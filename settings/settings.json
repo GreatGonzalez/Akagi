@@ -2,12 +2,12 @@
     "mitm": {
         "type": "majsoul",
         "host": "127.0.0.1",
-        "port": 7880
+        "port": 8080
     },
-    "model": "mortal",
+    "model": "akochan_local",
     "theme": "textual-dark",
     "ot_server": {
-        "server": "http://127.0.0.1:5000",
+        "server": "http://127.0.0.1:8080",
         "online": false,
         "api_key": "your_api_key"
     },

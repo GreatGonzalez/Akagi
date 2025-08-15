@@ -17,7 +17,125 @@ from .logger import logger
 from akagi.hooks import register_page
 import os
 from datetime import datetime
+import requests
+import os, json, ssl, smtplib
+from email.mime.text import MIMEText
+from typing import Optional, Tuple
+import logging
+
+notify_log = logging.getLogger("akagi.notify")
+AKAGI_DEBUG_NOTIFY        = os.getenv("AKAGI_DEBUG_NOTIFY", "0") == "1"
+LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "")
+LINE_USER_ID              = os.getenv("LINE_USER_ID", "")
 _PROOF_DIR = Path("logs/click_proof"); _PROOF_DIR.mkdir(parents=True, exist_ok=True)
+
+def _mask(s: str, show: int = 6) -> str:
+    if not s: return ""
+    return s[:show] + "..." if len(s) > show else "***"
+
+
+def send_line_message_api(message: str) -> bool:
+    """LINE Messaging API で push 通知を送る（詳細ログ付き）"""
+    if not (LINE_CHANNEL_ACCESS_TOKEN and LINE_USER_ID):
+        notify_log.error("[LINE] token or user_id missing")
+        return False
+    url = "https://api.line.me/v2/bot/message/push"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}",
+    }
+    payload = {
+        "to": LINE_USER_ID,
+        "messages": [{"type": "text", "text": message}],
+    }
+
+    # ログ（トークンは伏せる）
+    if AKAGI_DEBUG_NOTIFY:
+        notify_log.info(f"[LINE] push -> user={_mask(LINE_USER_ID, 6)} payload={json.dumps(payload, ensure_ascii=False)}")
+    else:
+        notify_log.info(f"[LINE] push -> user={_mask(LINE_USER_ID, 6)}")
+
+    try:
+        resp = requests.post(url, headers=headers, json=payload, timeout=10)
+        ok = (resp.status_code == 200)
+        if ok:
+            notify_log.info("[LINE] sent OK (200)")
+        else:
+            notify_log.error(f"[LINE] API error: {resp.status_code} {resp.text[:500]}")
+        return ok
+    except requests.Timeout:
+        notify_log.error("[LINE] timeout")
+        return False
+    except Exception as e:
+        notify_log.exception(f"[LINE] exception: {e}")
+        return False
+
+def try_extract_end_result_from_text_frame(payload: str) -> Tuple[Optional[int], Optional[int]]:
+    """WS文字列(JSON想定)から (rank, point) を抽出。結果をログ。"""
+    try:
+        data = json.loads(payload)
+    except Exception:
+        notify_log.debug("[extract:text] not json")
+        return (None, None)
+
+    rank = None; point = None
+    rank_keys  = ["rank", "place", "final_rank", "result_rank"]
+    point_keys = ["point", "points", "finalPoint", "grade_score", "rating_score", "delta"]
+
+    def walk(obj):
+        nonlocal rank, point
+        if isinstance(obj, dict):
+            t = str(obj.get("type") or obj.get("event") or "").lower()
+            if "end" in t or "result" in t:
+                for k, v in obj.items():
+                    lk = str(k).lower()
+                    if rank is None and any(rk in lk for rk in rank_keys):
+                        try:
+                            r = int(v)
+                            if 1 <= r <= 4: rank = r
+                        except: pass
+                    if point is None and any(pk in lk for pk in point_keys):
+                        try:
+                            point = int(v)
+                        except:
+                            try: point = int(float(v))
+                            except: pass
+            for v in obj.values():
+                if rank is not None and point is not None: break
+                walk(v)
+        elif isinstance(obj, list):
+            for it in obj:
+                if rank is not None and point is not None: break
+                walk(it)
+
+    walk(data)
+    notify_log.info(f"[extract:text] rank={rank} point={point}")
+    return (rank, point)
+
+
+def try_extract_end_result_from_parsed_msg(m: dict) -> Tuple[Optional[int], Optional[int]]:
+    """bridge.parse() の1要素(dict想定)から (rank, point) を抽出。結果をログ。"""
+    if not isinstance(m, dict):
+        notify_log.debug("[extract:parsed] not dict")
+        return (None, None)
+    rank = None; point = None
+    for k in ["rank", "place", "final_rank", "result_rank"]:
+        if k in m:
+            try:
+                r = int(m[k])
+                if 1 <= r <= 4: rank = r; break
+            except: pass
+    for k in ["point", "points", "finalPoint", "grade_score", "rating_score", "delta"]:
+        if k in m:
+            try:
+                point = int(m[k])
+            except:
+                try: point = int(float(m[k]))
+                except: pass
+            break
+    notify_log.info(f"[extract:parsed] rank={rank} point={point}")
+    return (rank, point)
+
 
 def _ts() -> str:
     return datetime.now().strftime("%Y%m%d_%H%M%S_%f")
@@ -264,6 +382,8 @@ class PlaywrightController:
         self._postgame_guard = PostGameGuard()
         self._ended = False  # ← 終局フラグ（WS/解析で True）
         self._started = False  # ← 追加：次の対戦が始まったか
+        self._last_end_rank: Optional[int] = None
+        self._last_end_point: Optional[int] = None
     # -------------- WebSocket -------------
 
     def _on_web_socket(self, ws: WebSocket) -> None:
@@ -294,9 +414,15 @@ class PlaywrightController:
         # 文字列フレームに 'end_game' が含まれていれば即フラグ
         try:
             if isinstance(payload, str):
+                if ('"type":"end_game"' in payload) or ("'type': 'end_game'" in payload):
+                    self._ended = True
+                    r, p = try_extract_end_result_from_text_frame(payload)
+                    if r is not None: self._last_end_rank = r
+                    if p is not None: self._last_end_point = p
+                    notify_log.info(f"[ws:text] end_game detected rank={self._last_end_rank} point={self._last_end_point}")
                 if ('"type":"start_game"' in payload) or ("'type': 'start_game'" in payload):
                     self._started = True
-                    logger.info("[PostGame] start_game detected in WS text frame")
+                    notify_log.info("[ws:text] start_game detected")
         except Exception:
             pass
 
@@ -310,10 +436,13 @@ class PlaywrightController:
                             t = m.get("type")
                             if t == "end_game":
                                 self._ended = True
-                                logger.info("[PostGame] end_game detected in parsed msgs")
+                                r, p = try_extract_end_result_from_parsed_msg(m)
+                                if r is not None: self._last_end_rank = r
+                                if p is not None: self._last_end_point = p
+                                notify_log.info(f"[ws:parsed] end_game detected rank={self._last_end_rank} point={self._last_end_point}")
                             elif t == "start_game":
                                 self._started = True
-                                logger.info("[PostGame] start_game detected in parsed msgs")
+                                notify_log.info("[ws:parsed] start_game detected")
                         mjai_messages.put(m)
                     except Exception:
                         pass
@@ -456,21 +585,32 @@ class PlaywrightController:
                     try:
                         # 終局フラグが立っており、直近2秒アイドルなら後片付け実行
                         if self._ended and self._postgame_guard.idle_for(2.0):
-                            logger.info("[PostGame] running fixed click sequence (with proof)...")
-                            # 直前に start フラグを下ろしておく
+                            logger.info("[PostGame] handling post-game flow...")
+                            # ← どちらか一方を使用
+                            # ok = handle_post_game_safe(self.page)
+                            # ok = run_fixed_postgame_sequence(self.page)
+
+
+                            # 本文の作成（rank/point が無ければ“不明”）
+                            rank_txt  = f"{self._last_end_rank}位" if self._last_end_rank is not None else "順位: 不明"
+                            point_txt = f"{self._last_end_point}pt" if self._last_end_point is not None else "ポイント: 不明"
+                            body = (
+                                "雀魂 終局\n"
+                                f"結果: {rank_txt}\n"
+                                f"現在ポイント: {point_txt}\n"
+                                f"時刻: {time.strftime('%Y-%m-%d %H:%M:%S')}"
+                            )
+
+                            sent = send_line_message_api(body)
+                            notify_log.info(f"[notify] sent={sent}")
+
                             self._started = False
                             run_fixed_postgame_sequence(self.page)
 
-                            # WSで開始を待つ（30秒まで）
-                            started = self._wait_started(timeout_sec=30.0)
-                            logger.info(f"[Proof] WS start_game detected: {started}")
-
-                            # 証跡の最終スクショ
-                            _snap(self.page, f"final_started_{started}")
-
-                            # フラグ整理とガード更新
+                            # フラグ整理
                             self._ended = False
                             self._postgame_guard.bump()
+                        
                     except Exception as e:
                         logger.error(f"[post-game] error: {e}")
                 continue
@@ -551,12 +691,6 @@ def _ensure_viewport(page: Page, need_w: int, need_h: int) -> None:
     if new_w != cur_w or new_h != cur_h:
         page.set_viewport_size({"width": new_w, "height": new_h})
 
-def _safe_abs_click(page: Page, x: int, y: int, pad: int = 10, delay_ms: int = 80) -> None:
-    """絶対座標クリック（必要に応じてviewport拡張してからクリック）。"""
-    _ensure_viewport(page, need_w=x + pad, need_h=y + pad)
-    page.mouse.click(x, y)
-    page.wait_for_timeout(delay_ms)
-
 def run_fixed_postgame_sequence(page: Page) -> None:
     """
     終局 → 10秒 → (1456,929) → 5秒 → (1456,929) → 5秒 → (1223,937) → 5秒 → (666,775)
@@ -565,7 +699,7 @@ def run_fixed_postgame_sequence(page: Page) -> None:
     # 事前スクショ
     # _snap(page, "before_sequence")
 
-    # 10秒待機
+    # 30秒待機
     page.wait_for_timeout(30_000)
 
     # 1回目 確認

@@ -1,15 +1,17 @@
 {
-    "mitm": {
-        "type": "majsoul",
-        "host": "127.0.0.1",
-        "port": 8080
+    "playwright": {
+        "majsoul_url": "https://game.mahjongsoul.com/index.html?lang=ja",
+        "viewport": {
+            "width": 1600,
+            "height": 960
+        }
     },
     "model": "akochan_local",
     "theme": "textual-dark",
     "ot_server": {
         "server": "http://127.0.0.1:8080",
         "online": false,
-        "api_key": "your_api_key"
+        "api_key": "dummy"
     },
     "autoplay": true,
     "auto_switch_model": true

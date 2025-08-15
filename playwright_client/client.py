@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 import loguru
 from loguru import logger as main_logger
 from datetime import datetime

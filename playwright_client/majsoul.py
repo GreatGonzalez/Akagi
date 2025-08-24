@@ -12,6 +12,8 @@ from playwright.sync_api import (
     TimeoutError as PWTimeout,
 )
 
+from email.header import Header
+from email.utils import formatdate, make_msgid, formataddr
 from .bridge import MajsoulBridge
 from .logger import logger
 from akagi.hooks import register_page
@@ -20,14 +22,184 @@ from datetime import datetime
 import requests
 import os, json, ssl, smtplib
 from email.mime.text import MIMEText
-from typing import Optional, Tuple
+from typing import Optional, Dict, Any, Tuple, List
 import logging
 
 notify_log = logging.getLogger("akagi.notify")
 AKAGI_DEBUG_NOTIFY        = os.getenv("AKAGI_DEBUG_NOTIFY", "0") == "1"
-LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "")
-LINE_USER_ID              = os.getenv("LINE_USER_ID", "")
+
+LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "+qrM74c/z/cvE7GAi1ul9+Zpwv78TQW42f6E708XYen1M6qiFQX7FTB57Z6vwxgVgS8jH0g9jJdjTQtV3PEHJMwdyZjgpvVt92BhQ0KOujah+J/fNGK7jYrbswtObHQ+wn3m14rQZQKdKsRDvouCtgdB04t89/1O/w1cDnyilFU=")
+LINE_USER_ID              = os.getenv("LINE_USER_ID", "U1c2db82d9871049d72d5e26feeb7eb19")
+
+SLACK_BOT_TOKEN  = os.getenv("SLACK_BOT_TOKEN", "xoxb-9401305398708-9397678472290-ms1ofUzY0QYavAbSskkOUfy9")
+SLACK_CHANNEL_ID = os.getenv("SLACK_CHANNEL_ID", "C09BT8ZHYTE")
+
 _PROOF_DIR = Path("logs/click_proof"); _PROOF_DIR.mkdir(parents=True, exist_ok=True)
+
+def _as_int(v):
+    if v is None: return None
+    try:
+        return int(v)
+    except Exception:
+        try:
+            return int(float(v))
+        except Exception:
+            return None
+        
+def _peek_both_scores(page):
+    js = r"""
+    () => new Promise((resolve) => {
+      app.NetAgent.sendReq2Lobby("Lobby", "fetchInfo", {}, (err, info) => {
+        if (err || !info || !info.account) { resolve(null); return; }
+        const l4 = info.account.level?.score ?? null;
+        const l3 = info.account.level3?.score ?? null;
+        resolve({ level_score_4p: l4, level_score_3p: l3 });
+      });
+    })
+    """
+    try:
+        return page.evaluate(js)
+    except Exception:
+        return None
+
+def fetch_rank_score_with_retry(page: Page, is_sanma: bool, retries: int = 3, wait_ms: int = 300) -> Optional[int]:
+    """
+    fetchInfo を叩いて Account.level / level3 の score を取得。
+    取りこぼしや反映遅延に備えてリトライ。
+    """
+    js = r"""
+    (isSanma) => new Promise((resolve) => {
+      app.NetAgent.sendReq2Lobby("Lobby", "fetchInfo", {},
+        function(err, info){
+          if (err || !info || !info.account) { resolve(null); return; }
+          const lv = isSanma ? info.account.level3 : info.account.level;
+          const v = (lv && typeof lv.score === 'number') ? lv.score : null;
+          resolve(v);
+        });
+    })
+    """
+    for _ in range(retries):
+        try:
+            v = page.evaluate(js, is_sanma)
+            if isinstance(v, (int, float)):
+                return int(v)
+        except Exception:
+            pass
+        page.wait_for_timeout(wait_ms)
+    return None
+
+
+def fetch_my_latest_result(page) -> Optional[dict]:
+    # ...（docstringはそのまま）
+
+    js = r"""
+    () => new Promise((resolve) => {
+    function clone(x){ try{ return JSON.parse(JSON.stringify(x)); }catch(_){ return null; } }
+    // Long/文字列 -> number 正規化
+    function num(v){
+        if (typeof v === "number") return v;
+        if (v && typeof v.toNumber === "function") { // protobuf Long
+        try { return v.toNumber(); } catch(_) {}
+        }
+        if (typeof v === "string" && v.trim() !== "") {
+        const n = Number(v);
+        if (!Number.isNaN(n)) return n;
+        }
+        return null;
+    }
+
+    const myId = GameMgr?.Inst?.account_id;
+    if (!myId) { resolve(null); return; }
+
+    app.NetAgent.sendReq2Lobby("Lobby", "fetchGameRecordList",
+        { start: 0, count: 1, type: 2 },
+        function(err, list){
+        if (err || !list || !list.record_list || list.record_list.length === 0) {
+            resolve(null); return;
+        }
+        const uuid = list.record_list[0].uuid;
+
+        app.NetAgent.sendReq2Lobby("Lobby", "fetchGameRecord",
+            { game_uuid: uuid, client_version_string: GameMgr.Inst.getClientVersion() },
+            function(err2, rec){
+            if (err2 || !rec) { resolve(null); return; }
+
+            const head = clone(rec.head) || {};
+            const accounts = Array.isArray(head.accounts) ? head.accounts : [];
+            const result = head.result || {};
+            const players = Array.isArray(result.players) ? result.players : [];
+
+            // 自席 seat
+            let mySeat = null, myAcc = null;
+            for (let i = 0; i < accounts.length; i++) {
+                const a = accounts[i];
+                if (!a) continue;
+                if (a.account_id === myId) { mySeat = (a.seat ?? i); myAcc = a; break; }
+            }
+            if (mySeat === null) { resolve(null); return; }
+
+            // 順位
+            let rank = null;
+            if (players.length > 0) {
+                const sorted = clone(players).sort((a,b)=>( (num(b?.total_point ?? b?.totalScore ?? b?.score) ?? 0) - (num(a?.total_point ?? a?.totalScore ?? a?.score) ?? 0) ));
+                rank = 1 + sorted.findIndex(p => p && p.seat === mySeat);
+                if (rank <= 0) rank = null;
+            }
+
+            const isSanma = (accounts.length === 3);
+
+            // スコア/増減の抽出
+            const pickScore = (p) => {
+                if (!p) return null;
+                return num(p.total_point ?? p.totalScore ?? p.score);
+            };
+            const pickDelta = (p) => {
+                if (!p) return null;
+                return num(p.grading_score ?? p.rating_score ?? p.delta);
+            };
+
+            let myTotal = null, myDelta = null;
+            for (const p of players) {
+                if (p && p.seat === mySeat) {
+                myTotal = pickScore(p);
+                myDelta = pickDelta(p);
+                break;
+                }
+            }
+
+            // 牌譜の「対局者」から開始時段位ポイントを取得（四麻: level.score / 三麻: level3.score）
+            const gradingBefore = isSanma
+                ? num(myAcc?.level3?.score)
+                : num(myAcc?.level?.score);
+
+            // after は before + delta（どちらか欠けたら null）
+            const gradingAfter = (gradingBefore != null && myDelta != null)
+                ? (gradingBefore + myDelta)
+                : null;
+
+            resolve({
+                uuid,
+                rank,
+                score: myTotal,
+                grading_delta: myDelta,
+                grading_after: gradingAfter,   // ← ここが埋まる
+                grading_before: gradingBefore, // ← デバッグ用に返すと便利
+                is_sanma: !!isSanma
+            });
+            });
+        });
+    })
+    """
+
+    try:
+        data = page.evaluate(js)
+        notify_log.info(f"[API] data={str(data)}")
+        if not data or not isinstance(data, dict):
+            return None
+
+        return data
+    except Exception:
+        return None
 
 def _mask(s: str, show: int = 6) -> str:
     if not s: return ""
@@ -69,6 +241,75 @@ def send_line_message_api(message: str) -> bool:
     except Exception as e:
         notify_log.exception(f"[LINE] exception: {e}")
         return False
+    
+def send_slack_message_api(
+    message: str,
+    channel_id: Optional[str] = None,
+    thread_ts: Optional[str] = None,
+    max_retries: int = 3,
+    timeout_sec: int = 10,
+) -> bool:
+    """
+    Slack の chat.postMessage で通知を送る（簡易リトライ付き、429対応）。
+    依存: requests
+    """
+    token = SLACK_BOT_TOKEN
+    channel = channel_id or SLACK_CHANNEL_ID
+
+    if not token or not channel:
+        notify_log.error("[Slack] token or channel_id missing")
+        return False
+
+    url = "https://slack.com/api/chat.postMessage"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json; charset=utf-8",
+    }
+    payload: Dict[str, Any] = {"channel": channel, "text": message}
+    if thread_ts:
+        payload["thread_ts"] = thread_ts  # スレッド返信したいとき
+
+    # ログ（トークンは伏せる）
+    if AKAGI_DEBUG_NOTIFY:
+        notify_log.info(f"[Slack] post -> ch={_mask(channel, 6)} payload={json.dumps(payload, ensure_ascii=False)}")
+    else:
+        notify_log.info(f"[Slack] post -> ch={_mask(channel, 6)}")
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            resp = requests.post(url, headers=headers, json=payload, timeout=timeout_sec)
+            if resp.status_code == 429:
+                # レート制限: Retry-After 秒待つ
+                retry_after = int(resp.headers.get("Retry-After", "1"))
+                notify_log.warning(f"[Slack] 429 Too Many Requests, retry after {retry_after}s (attempt {attempt}/{max_retries})")
+                time.sleep(retry_after)
+                continue
+
+            data = {}
+            try:
+                data = resp.json()
+            except Exception:
+                pass
+
+            if resp.ok and data.get("ok"):
+                notify_log.info(f"[Slack] sent OK (ts={data.get('ts')})")
+                return True
+
+            # それ以外は内容をログ出し
+            snippet = resp.text[:500]
+            notify_log.error(f"[Slack] API error: {resp.status_code} {snippet}")
+        except requests.Timeout:
+            notify_log.error("[Slack] timeout")
+        except Exception as e:
+            notify_log.exception(f"[Slack] exception: {e}")
+
+        # 次の試行まで指数バックオフ
+        sleep_sec = 2 ** attempt
+        notify_log.warning(f"[Slack] retrying in {sleep_sec}s (attempt {attempt}/{max_retries})")
+        time.sleep(sleep_sec)
+
+    return False
+
 
 def try_extract_end_result_from_text_frame(payload: str) -> Tuple[Optional[int], Optional[int]]:
     """WS文字列(JSON想定)から (rank, point) を抽出。結果をログ。"""
@@ -271,68 +512,6 @@ def _click_cloud(page: Page, rx: float, ry: float, step_px: int = 8, max_px: int
     return False
 
 
-def click_confirm_strong(page: Page, buttons: PostGameButtons) -> bool:
-    """
-    確認ボタンを“なんとしても”押す。
-    1) DOM, 2) Enter, 3) Canvas微小スキャン, 4) Space
-    """
-    if _click_dom_button(page, NAMES_CONFIRM, delay_ms=150):
-        return True
-    try:
-        page.keyboard.press("Enter")
-        page.wait_for_timeout(250)
-        if not is_post_game_screen(page):
-            return True
-    except Exception:
-        pass
-    if _click_cloud(page, buttons.confirm_rel_x, buttons.confirm_rel_y, step_px=8, max_px=32, delay_ms=90):
-        return True
-    try:
-        page.keyboard.press("Space")
-        page.wait_for_timeout(200)
-        if not is_post_game_screen(page):
-            return True
-    except Exception:
-        pass
-    return False
-
-
-def handle_post_game_safe(page: Page, buttons: PostGameButtons = PostGameButtons()) -> bool:
-    """
-    終局後の 確認→確認→もう一局 を“安全に”押す。
-    - DOMが取れれば DOM
-    - Canvasなら微小スキャン
-    """
-    # 1) 確認1
-    if not click_confirm_strong(page, buttons):
-        return False
-    page.wait_for_timeout(600)
-
-    # 2) 確認2（遷移済みならスキップ）
-    if is_post_game_screen(page):
-        if not click_confirm_strong(page, buttons):
-            return False
-        page.wait_for_timeout(600)
-
-    # 3) もう一局（DOM優先、無ければ軽い相対クリック補助）
-    tries = 0
-    deadline = time.time() + 15.0
-    while time.time() < deadline:
-        if _click_dom_button(page, NAMES_PLAY_AGAIN, delay_ms=120):
-            break
-        tries += 1
-        if tries <= 2:
-            _click_rel(page, buttons.play_again_rel_x, buttons.play_again_rel_y, 120)
-        page.wait_for_timeout(400)
-
-        # ボタンが消えたら遷移中/開始とみなす
-        if not is_post_game_screen(page):
-            return True
-
-    # 最終確認：ボタンが見えなければ開始済みとみなす
-    return not is_post_game_screen(page)
-
-
 class PostGameGuard:
     """直近アクティビティ時刻を管理して、一定時間“静止”している時だけ後片付けを許可"""
     def __init__(self) -> None:
@@ -362,7 +541,7 @@ class PlaywrightController:
     and handles clicking based on a normalized 16x9 grid.
     """
 
-    def __init__(self, url: str, width: int = 1600, height: int = 960) -> None:
+    def __init__(self, url: str, width: int = 1600, height: int = 900) -> None:
         """
         Initializes the controller.
         Args:
@@ -384,6 +563,7 @@ class PlaywrightController:
         self._started = False  # ← 追加：次の対戦が始まったか
         self._last_end_rank: Optional[int] = None
         self._last_end_point: Optional[int] = None
+        self._auto_started_once = False
     # -------------- WebSocket -------------
 
     def _on_web_socket(self, ws: WebSocket) -> None:
@@ -586,29 +766,84 @@ class PlaywrightController:
                         # 終局フラグが立っており、直近2秒アイドルなら後片付け実行
                         if self._ended and self._postgame_guard.idle_for(2.0):
                             logger.info("[PostGame] handling post-game flow...")
-                            # ← どちらか一方を使用
-                            # ok = handle_post_game_safe(self.page)
-                            # ok = run_fixed_postgame_sequence(self.page)
+                            info = fetch_my_latest_result(self.page)
+                            if info:
+                                rank  = _as_int(info.get("rank"))
+                                score = _as_int(info.get("score"))
+                                delta = _as_int(info.get("grading_delta"))
+                                total_score = _as_int(info.get("grading_after"))
 
+                                # 追加: WS 由来ポイントの保険
+                                if score is None and self._last_end_point is not None:
+                                    score = _as_int(self._last_end_point)
+                                
+                                # ★ 順位に応じて補正を追加
+                                bonus = 0
+                                if rank == 1:
+                                    bonus = 10000
+                                elif rank == 2:
+                                    bonus = 20000
+                                elif rank == 3:
+                                    bonus = 30000
 
-                            # 本文の作成（rank/point が無ければ“不明”）
-                            rank_txt  = f"{self._last_end_rank}位" if self._last_end_rank is not None else "順位: 不明"
-                            point_txt = f"{self._last_end_point}pt" if self._last_end_point is not None else "ポイント: 不明"
-                            body = (
-                                "雀魂 終局\n"
-                                f"結果: {rank_txt}\n"
-                                f"現在ポイント: {point_txt}\n"
-                                f"時刻: {time.strftime('%Y-%m-%d %H:%M:%S')}"
-                            )
+                                # delta の表示形式を調整 (+付き)
+                                delta_txt = "不明"
+                                if delta is not None:
+                                    delta_txt = f"{delta:+}"
 
-                            sent = send_line_message_api(body)
-                            notify_log.info(f"[notify] sent={sent}")
+                                disp_score = None if score is None else (score + bonus)
+                                rank_txt  = f"{rank}位" if rank is not None else "不明"
+                                if rank == 4:
+                                    score_txt = "不明"
+                                else:
+                                    score_txt = f"{disp_score:,}" if disp_score is not None else "不明"
+
+                                # 送信用メッセージ
+                                body = (
+                                    "雀魂 終局\n"
+                                    f"結果順位: {rank_txt}\n"
+                                    f"最終スコア: {score_txt}\n"
+                                    f"加算ポイント: {delta_txt}\n"
+                                    f"現在のポイント: {total_score}\n"
+                                    f"時刻: {time.strftime('%Y/%m/%d %H:%M')}"
+                                )
+                                peek = _peek_both_scores(self.page)
+                                notify_log.info(f"[peek] level_score_4p={peek and peek.get('level_score_4p')} "
+                                                f"level_score_3p={peek and peek.get('level_score_3p')} "
+                                                f"is_sanma_guess={info.get('is_sanma')}")
+                                # ★ あなたの既存の LINE 送信関数（Messaging API）を呼ぶ
+                                # 例）send_line_message_api(message=body)
+                                send_line_message_api(message=body)
+                                send_slack_message_api(message=body)
+                                
+                            else:
+                                # 取れなかった場合でも通知（必要なければ省略可）
+                                body = (
+                                    "雀魂 終局\n"
+                                    "結果情報の取得に失敗しました（API応答なし）\n"
+                                    f"時刻: {time.strftime('%Y/%m/%d %H:%M:%S')}"
+                                )
+                                send_line_message_api(message=body)
+                            
 
                             self._started = False
-                            run_fixed_postgame_sequence(self.page)
-
-                            # フラグ整理
                             self._ended = False
+                            
+                            self.page.wait_for_timeout(10_000)  # 少し待機
+                            # _snap(self.page, "result")
+                            self.page.wait_for_timeout(3_000)  # 少し待機
+                                # ★ ページを再読み込み（F5 相当）
+                            try:
+                                self.page.reload()
+                                self.page.wait_for_timeout(15_000)  # 少し待機
+                                self.page.reload()
+                                self.page.wait_for_timeout(10000)  # 少し待機
+                            except Exception as e:
+                                logger.error(f"[Recovery] reload failed: {e}")
+
+                            # run_fixed_postgame_sequence(self.page)
+                            run_auto_start_sequence(self.page)
+
                             self._postgame_guard.bump()
                         
                     except Exception as e:
@@ -634,6 +869,7 @@ class PlaywrightController:
                     viewport={"width": self.width, "height": self.height},
                     ignore_default_args=['--enable-automation'],
                     args=["--noerrdialogs"],
+                    chromium_sandbox=True,
                 )
 
                 pages: list[Page] = self.browser.pages
@@ -651,7 +887,17 @@ class PlaywrightController:
                 logger.info(f"Navigating to {self.url}...")
                 register_page(self.page)  # hooks: 外部オート等が必要な場合の受け渡し
                 self.page.goto(self.url)
-                logger.info("Page loaded. Ready for commands.")
+
+                # --- 起動直後の自動“対戦開始”（一度だけ） ---
+                try:
+                    if not self._auto_started_once and not self._started:
+                        # ロビーUIが整うまで少し待つ（必要に応じて調整）
+                        self.page.wait_for_timeout(3000)
+                        run_auto_start_sequence(self.page)
+                        self._auto_started_once = True
+                except Exception as e:
+                    logger.error(f"[auto-start] failed: {e}")
+# -------------------------------------------
 
                 # メインループ開始
                 self._process_commands()
@@ -699,12 +945,12 @@ def run_fixed_postgame_sequence(page: Page) -> None:
     # 事前スクショ
     # _snap(page, "before_sequence")
 
-    # 30秒待機
+    # 20秒待機
     page.wait_for_timeout(30_000)
 
     # 1回目 確認
     _ensure_viewport(page, need_w=1500+10, need_h=870+10)
-    _snap_with_marker(page, 1500, 870, "tap1_marker")
+    _snap_with_marker(page, 1500, 870, "end1_marker")
     page.mouse.click(1500, 870)
     page.wait_for_timeout(5_000)
     # _snap(page, "after_tap1")
@@ -712,22 +958,22 @@ def run_fixed_postgame_sequence(page: Page) -> None:
 
     # 2回目 確認
     _ensure_viewport(page, need_w=1500+10, need_h=870+10)
-    _snap_with_marker(page, 1500, 870, "tap2_marker")
+    _snap_with_marker(page, 1500, 870, "end2_marker")
     page.mouse.click(1500, 870)
     page.wait_for_timeout(5_000)
     # _snap(page, "after_tap2")
     # page.wait_for_timeout(5_000)
 
-    # もう一局
-    _ensure_viewport(page, need_w=1300+10, need_h=350+10)
-    _snap_with_marker(page, 1300, 350, "tap3_marker")
-    page.mouse.click(1300, 350)
+    # 3回目 確認
+    _ensure_viewport(page, need_w=1300+10, need_h=300+10)
+    _snap_with_marker(page, 1300, 300, "start1_ranked")
+    page.mouse.click(1300, 300)
     page.wait_for_timeout(5_000)
     # _snap(page, "after_tap3")
     # page.wait_for_timeout(5_000)
     # もう一局
     _ensure_viewport(page, need_w=1300+10, need_h=850+10)
-    _snap_with_marker(page, 1300, 850, "tap3_marker")
+    _snap_with_marker(page, 1300, 850, "end3_marker")
     page.mouse.click(1300, 850)
     page.wait_for_timeout(5_000)
     # _snap(page, "after_tap3")
@@ -735,10 +981,45 @@ def run_fixed_postgame_sequence(page: Page) -> None:
 
     # 最後のクリック
     _ensure_viewport(page, need_w=666+10, need_h=700+10)
-    _snap_with_marker(page, 666, 700, "tap4_marker")
+    _snap_with_marker(page, 666, 700, "end4_marker")
     page.mouse.click(666, 700)
     # page.wait_for_timeout(5_000)
     # _snap(page, "after_tap4")
 
     # ここで「対戦開始」を WS で検証（start_game フラグ）
     logger.info("[Proof] waiting for start_game via WS...")
+
+def run_auto_start_sequence(page: Page) -> None:
+    """
+    「対戦開始」導線。
+    - 段位戦 -> 金の間 -> 四人南 の順にクリック
+    - それぞれマーカー付きで証跡を残す
+    """
+    logger.info("[auto-start] begin")
+    page.wait_for_timeout(10_000)
+
+    # 段位戦
+    _ensure_viewport(page, need_w=1300+10, need_h=250+10)
+    # _snap_with_marker(page, 1300, 250, "start1_ranked")
+    page.mouse.click(1300, 250)
+    page.wait_for_timeout(5_000)
+
+    # 金の間
+    # _ensure_viewport(page, need_w=1300+10, need_h=650+10)  # 高さ > デフォルトでもOK（自動拡張）
+    # # _snap_with_marker(page, 1300, 650, "start2_gold")
+    # page.mouse.click(1300, 650)
+    # page.wait_for_timeout(5_000)
+
+    # 王の間
+    _ensure_viewport(page, need_w=1300+10, need_h=750+10)  # 高さ > デフォルトでもOK（自動拡張）
+    # _snap_with_marker(page, 1300, 750, "start2_king")
+    page.mouse.click(1300, 750)
+    page.wait_for_timeout(5_000)
+
+    # 四人南
+    _ensure_viewport(page, need_w=1300+10, need_h=550+10)
+    # _snap_with_marker(page, 1300, 550, "start3_4p_south")
+    page.mouse.click(1300, 550)
+    page.wait_for_timeout(5_000)
+
+    logger.info("[auto-start] done")

@@ -13,7 +13,7 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
         logging.FileHandler("logs/akagi.log", encoding="utf-8"),
-        logging.StreamHandler(sys.stdout)
+        # logging.StreamHandler(sys.stdout)
     ]
 )
 

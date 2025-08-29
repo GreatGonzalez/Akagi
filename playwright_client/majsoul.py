@@ -34,7 +34,87 @@ LINE_USER_ID              = os.getenv("LINE_USER_ID", "U1c2db82d9871049d72d5e26f
 SLACK_BOT_TOKEN  = os.getenv("SLACK_BOT_TOKEN", "xoxb-9401305398708-9397678472290-ms1ofUzY0QYavAbSskkOUfy9")
 SLACK_CHANNEL_ID = os.getenv("SLACK_CHANNEL_ID", "C09BT8ZHYTE")
 
+# ★ 追加: 段位しきい値（≦なら開始）
+AKAGI_MAX_RANK_ID_4P = os.getenv("AKAGI_MAX_RANK_ID_4P", "10401")  # 例: "10401"（四麻 雀豪1 など）
+AKAGI_MAX_RANK_ID_3P = os.getenv("AKAGI_MAX_RANK_ID_3P")  # 例: "20302"（三麻 雀傑2 など）
+
 _PROOF_DIR = Path("logs/click_proof"); _PROOF_DIR.mkdir(parents=True, exist_ok=True)
+
+def wait_for_account_ready(page: Page, timeout_ms: int = 180_000, poll_ms: int = 500) -> bool:
+    """
+    GameMgr/NetAgent 初期化と account_id>0（=ログイン完了）まで待つ。
+    進捗をログ出力。True=準備OK, False=タイムアウト。
+    """
+    end = time.time() + (timeout_ms / 1000.0)
+    js_probe = r"""
+    () => {
+      const id = (globalThis.GameMgr && GameMgr.Inst && typeof GameMgr.Inst.account_id !== 'undefined')
+          ? GameMgr.Inst.account_id : -1;
+      const hasAcc = !!(GameMgr && GameMgr.Inst && GameMgr.Inst.account_data);
+      const hasNet = !!(globalThis.app && app.NetAgent && app.NetAgent.sendReq2Lobby);
+      // 参照できる環境により名前が違うことがあるので広めに見る
+      const inHall = !!(GameMgr?.Inst?.in_hall || GameMgr?.Inst?.in_lobby || GameMgr?.Inst?.lobby);
+      return { id, hasAcc, hasNet, inHall };
+    }
+    """
+    last_print = 0.0
+    while time.time() < end:
+        try:
+            st = page.evaluate(js_probe)
+            # 1秒に1回くらい進捗ログ
+            now = time.time()
+            if now - last_print > 1.0:
+                notify_log.info(f"[READY] id={st.get('id')} hasAcc={st.get('hasAcc')} hasNet={st.get('hasNet')} inHall={st.get('inHall')}")
+                last_print = now
+            if isinstance(st, dict) and (int(st.get("id", -1)) > 0):
+                notify_log.info("[READY] account_id > 0 を確認。段位取得を開始します。")
+                return True
+        except Exception:
+            pass
+        page.wait_for_timeout(poll_ms)
+    notify_log.warning("[READY] タイムアウト：account_id が正になりませんでした（未ログイン/未入場）")
+    return False
+
+def allow_auto_start_by_rank(page: Page) -> bool:
+    # 準備ができるまで待つ（未ログインなら False）
+    if not wait_for_account_ready(page, timeout_ms=180_000):
+        notify_log.warning("[gate] account 未準備（account_id<=0）。ログイン/入場完了後に再試行してください。")
+        return False
+
+    max4 = _as_int(AKAGI_MAX_RANK_ID_4P)
+    max3 = _as_int(AKAGI_MAX_RANK_ID_3P)
+
+    info = fetch_current_rank_ids(page)
+    if info is None or (info.get("level_id_4") is None and info.get("level_id_3") is None):
+        if max4 is None and max3 is None:
+            notify_log.info("[gate] rank not detected, but no thresholds configured -> allow")
+            return True
+        notify_log.warning("[gate] rank not detected (after ready) and thresholds configured -> deny")
+        return False
+
+    cur4 = info.get("level_id_4"); cur3 = info.get("level_id_3")
+    acc = info.get("account_id");  nick = info.get("nickname")
+    notify_log.info(f"[gate] account={acc} nick={nick} cur4={cur4} cur3={cur3} max4={max4} max3={max3}")
+
+    if max4 is not None:
+        if cur4 is None:
+            notify_log.warning("[gate] 4p threshold set but current 4p rank unknown -> deny")
+            return False
+        allow = (cur4 <= max4)
+        notify_log.info(f"[gate] 4p check: {cur4} <= {max4} -> {allow}")
+        return allow
+
+    if max3 is not None:
+        if cur3 is None:
+            notify_log.warning("[gate] 3p threshold set but current 3p rank unknown -> deny")
+            return False
+        allow = (cur3 <= max3)
+        notify_log.info(f"[gate] 3p check: {cur3} <= {max3} -> {allow}")
+        return allow
+
+    notify_log.info("[gate] no thresholds -> allow")
+    return True
+
 
 def _as_int(v):
     if v is None: return None
@@ -45,7 +125,178 @@ def _as_int(v):
             return int(float(v))
         except Exception:
             return None
-        
+
+# ★ 追加: 現在段位ID取得（四麻 level.id / 三麻 level3.id）
+def fetch_current_rank_ids(page: Page) -> Optional[dict]:
+    """
+    段位IDを堅牢に取得。詳細デバッグ情報付き。
+    返り値: {
+        "account_id": int|None, "nickname": str|None,
+        "level_id_4": int|None, "level_id_3": int|None,
+        "_source": "local" | "fetchInfo_account" | "fetchInfo_list" | "fetchAccountInfo",
+        "debug": [str, ...]  # 取得経路ログ
+    }
+    """
+    js = r"""
+    () => new Promise((resolve) => {
+      const debug = [];
+      function j(o){ try{return JSON.stringify(o)}catch(_){return String(o)}}
+      function keys(o){ try{return Object.keys(o||{}).join(',')}catch(_){return ''} }
+
+      function num(v){
+        if (typeof v === "number") return v;
+        if (v && typeof v.toNumber === "function") { try { return v.toNumber(); } catch(_){} }
+        if (typeof v === "string" && v.trim() !== "") { const n = Number(v); if (!Number.isNaN(n)) return n; }
+        return null;
+      }
+      function pickInt(v){ const n = num(v); return (n == null ? null : Math.trunc(n)); }
+
+      const myId = (globalThis.GameMgr && GameMgr.Inst && GameMgr.Inst.account_id) ? GameMgr.Inst.account_id : null;
+      debug.push("myId=" + myId);
+      if (!myId) { debug.push("no myId -> abort"); resolve({debug}); return; }
+
+      // ---- 1) local (GameMgr.Inst.account_data)
+      try{
+        const acc = GameMgr?.Inst?.account_data || null;
+        debug.push("local: has_acc=" + !!acc);
+        if (acc){
+          const level  = acc.level  || {};
+          const level3 = acc.level3 || {};
+          const out = {
+            account_id: pickInt(acc.account_id ?? myId),
+            nickname: (acc.nickname ?? acc.nick ?? null),
+            level_id_4: pickInt(level.id),
+            level_id_3: pickInt(level3.id),
+            _source: "local",
+            debug
+          };
+          debug.push("local ids: 4=" + out.level_id_4 + " 3=" + out.level_id_3);
+          if (out.level_id_4 != null || out.level_id_3 != null) { resolve(out); return; }
+        }
+      }catch(e){ debug.push("local err: "+e); }
+
+      // ---- 2) fetchInfo({})
+      try{
+        app.NetAgent.sendReq2Lobby("Lobby", "fetchInfo", {}, function(err, resp){
+          if (err){ debug.push("fetchInfo{} err"); step3(); return; }
+          debug.push("fetchInfo{} keys=" + keys(resp));
+          if (resp && resp.error != null) debug.push("fetchInfo{} error=" + j(resp.error));
+          const a = resp && (resp.account || resp.info || resp.player || null);
+          if (a){
+            const level  = a.level  || {};
+            const level3 = a.level3 || {};
+            const out = {
+              account_id: pickInt(a.account_id ?? a.id ?? myId),
+              nickname: (a.nickname ?? a.nick ?? null),
+              level_id_4: pickInt(level.id),
+              level_id_3: pickInt(level3.id),
+              _source: "fetchInfo_account",
+              debug
+            };
+            debug.push("fetchInfo{} ids: 4=" + out.level_id_4 + " 3=" + out.level_id_3);
+            if (out.level_id_4 != null || out.level_id_3 != null) { resolve(out); return; }
+          }else{
+            debug.push("fetchInfo{} no account field");
+          }
+          step3(); // continue
+        });
+      }catch(e){ debug.push("fetchInfo{} throw:"+e); step3(); }
+
+      // ---- 3) fetchInfo({account_id_list:[myId]})  ※配列系の形状を総当り
+      function step3(){
+        try{
+          app.NetAgent.sendReq2Lobby("Lobby", "fetchInfo", { account_id_list: [myId] }, function(err, resp){
+            if (err){ debug.push("fetchInfo[list] err"); step4(); return; }
+            debug.push("fetchInfo[list] keys=" + keys(resp));
+            if (resp && resp.error != null) debug.push("fetchInfo[list] error=" + j(resp.error));
+            const candidates = resp && (resp.infos || resp.accounts || resp.players || resp.account_info || []);
+            const arr = Array.isArray(candidates) ? candidates : [candidates];
+            let picked = null;
+            for (const cand of arr){
+              if (!cand) continue;
+              const a = cand.account || cand; // 中に account を抱える形とフラットの両方に対応
+              const id = pickInt(a && (a.account_id ?? a.id));
+              if (id != null && id === pickInt(myId)){ picked = a; break; }
+            }
+            if (picked){
+              const level  = picked.level  || {};
+              const level3 = picked.level3 || {};
+              const out = {
+                account_id: pickInt(picked.account_id ?? picked.id ?? myId),
+                nickname: (picked.nickname ?? picked.nick ?? null),
+                level_id_4: pickInt(level.id),
+                level_id_3: pickInt(level3.id),
+                _source: "fetchInfo_list",
+                debug
+              };
+              debug.push("fetchInfo[list] ids: 4=" + out.level_id_4 + " 3=" + out.level_id_3);
+              if (out.level_id_4 != null || out.level_id_3 != null) { resolve(out); return; }
+            }else{
+              debug.push("fetchInfo[list] no matched account");
+            }
+            step4();
+          });
+        }catch(e){ debug.push("fetchInfo[list] throw:"+e); step4(); }
+      }
+
+      // ---- 4) fetchAccountInfo({account_id: myId})
+      function step4(){
+        try{
+          app.NetAgent.sendReq2Lobby("Lobby", "fetchAccountInfo", { account_id: myId }, function(err, resp){
+            if (err){ debug.push("fetchAccountInfo err"); finish(); return; }
+            debug.push("fetchAccountInfo keys=" + keys(resp));
+            if (resp && resp.error != null) debug.push("fetchAccountInfo error=" + j(resp.error));
+            const a = resp && (resp.account || resp.info || resp.player || resp) || null;
+            if (a){
+              const level  = a.level  || {};
+              const level3 = a.level3 || {};
+              const out = {
+                account_id: pickInt(a.account_id ?? a.id ?? myId),
+                nickname: (a.nickname ?? a.nick ?? null),
+                level_id_4: pickInt(level.id),
+                level_id_3: pickInt(level3.id),
+                _source: "fetchAccountInfo",
+                debug
+              };
+              debug.push("fetchAccountInfo ids: 4=" + out.level_id_4 + " 3=" + out.level_id_3);
+              resolve(out); return;
+            }
+            finish();
+          });
+        }catch(e){ debug.push("fetchAccountInfo throw:"+e); finish(); }
+      }
+
+      function finish(){
+        debug.push("all paths failed");
+        resolve({ debug });
+      }
+    })
+    """
+    try:
+        data = page.evaluate(js)
+        # JS 側で debug を常に返すので、ここで状況を可視化
+        dbg = (data or {}).get("debug") if isinstance(data, dict) else None
+        if isinstance(dbg, list):
+            for line in dbg:
+                notify_log.info(f"[RANK.debug] {line}")
+
+        if not data or not isinstance(data, dict):
+            notify_log.warning("[RANK] JS returned non-dict or null")
+            return None
+
+        # 正規化
+        data["account_id"] = _as_int(data.get("account_id"))
+        data["level_id_4"] = _as_int(data.get("level_id_4"))
+        data["level_id_3"] = _as_int(data.get("level_id_3"))
+
+        notify_log.info(f"[RANK] ids fetched: 4p={data.get('level_id_4')} 3p={data.get('level_id_3')} source={data.get('_source')}")
+        return data if (data.get("level_id_4") is not None or data.get("level_id_3") is not None) else data  # 取れなかった場合も debug のため返す
+    except Exception:
+        notify_log.exception("[RANK] fetch_current_rank_ids failed")
+        return None
+
+
+
 def _peek_both_scores(page):
     js = r"""
     () => new Promise((resolve) => {
@@ -811,9 +1062,7 @@ class PlaywrightController:
                                 notify_log.info(f"[peek] level_score_4p={peek and peek.get('level_score_4p')} "
                                                 f"level_score_3p={peek and peek.get('level_score_3p')} "
                                                 f"is_sanma_guess={info.get('is_sanma')}")
-                                # ★ あなたの既存の LINE 送信関数（Messaging API）を呼ぶ
-                                # 例）send_line_message_api(message=body)
-                                send_line_message_api(message=body)
+                                # send_line_message_api(message=body)
                                 send_slack_message_api(message=body)
                                 
                             else:
@@ -823,7 +1072,7 @@ class PlaywrightController:
                                     "結果情報の取得に失敗しました（API応答なし）\n"
                                     f"時刻: {time.strftime('%Y/%m/%d %H:%M:%S')}"
                                 )
-                                send_line_message_api(message=body)
+                                # send_line_message_api(message=body)
                             
 
                             self._started = False
@@ -842,7 +1091,15 @@ class PlaywrightController:
                                 logger.error(f"[Recovery] reload failed: {e}")
 
                             # run_fixed_postgame_sequence(self.page)
-                            run_auto_start_sequence(self.page)
+
+                            # ★ ここでゲート判定 → 許可時のみ開始
+                            try:
+                                if allow_auto_start_by_rank(self.page):
+                                    run_auto_start_sequence(self.page)
+                                else:
+                                    notify_log.warning("[auto-start] skipped by rank gate (post-game)")
+                            except Exception as e:
+                                logger.error(f"[gate] error: {e}")
 
                             self._postgame_guard.bump()
                         
@@ -893,8 +1150,12 @@ class PlaywrightController:
                     if not self._auto_started_once and not self._started:
                         # ロビーUIが整うまで少し待つ（必要に応じて調整）
                         self.page.wait_for_timeout(3000)
-                        run_auto_start_sequence(self.page)
-                        self._auto_started_once = True
+                        # ★ ゲート判定してから開始
+                        if allow_auto_start_by_rank(self.page):
+                            run_auto_start_sequence(self.page)
+                            self._auto_started_once = True
+                        else:
+                            notify_log.warning("[auto-start] skipped by rank gate (boot)")
                 except Exception as e:
                     logger.error(f"[auto-start] failed: {e}")
 # -------------------------------------------
@@ -992,7 +1253,7 @@ def run_fixed_postgame_sequence(page: Page) -> None:
 def run_auto_start_sequence(page: Page) -> None:
     """
     「対戦開始」導線。
-    - 段位戦 -> 金の間 -> 四人南 の順にクリック
+    - 段位戦 -> 金の間/王の間 -> 四人南 の順にクリック
     - それぞれマーカー付きで証跡を残す
     """
     logger.info("[auto-start] begin")
@@ -1004,14 +1265,13 @@ def run_auto_start_sequence(page: Page) -> None:
     page.mouse.click(1300, 250)
     page.wait_for_timeout(5_000)
 
-    # 金の間
-    # _ensure_viewport(page, need_w=1300+10, need_h=650+10)  # 高さ > デフォルトでもOK（自動拡張）
-    # # _snap_with_marker(page, 1300, 650, "start2_gold")
+    # 金の間（必要なら）
+    # _ensure_viewport(page, need_w=1300+10, need_h=650+10)
     # page.mouse.click(1300, 650)
     # page.wait_for_timeout(5_000)
 
-    # 王の間
-    _ensure_viewport(page, need_w=1300+10, need_h=750+10)  # 高さ > デフォルトでもOK（自動拡張）
+    # 王の間（本コードではこちらを選択）
+    _ensure_viewport(page, need_w=1300+10, need_h=750+10)
     # _snap_with_marker(page, 1300, 750, "start2_king")
     page.mouse.click(1300, 750)
     page.wait_for_timeout(5_000)

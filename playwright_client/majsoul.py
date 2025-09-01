@@ -1044,14 +1044,11 @@ class PlaywrightController:
 
                                 disp_score = None if score is None else (score + bonus)
                                 rank_txt  = f"{rank}位" if rank is not None else "不明"
-                                if rank == 4:
-                                    score_txt = "不明"
-                                else:
-                                    score_txt = f"{disp_score:,}" if disp_score is not None else "不明"
+                                score_txt = f"{disp_score:,}" if disp_score is not None else "不明"
 
                                 # 送信用メッセージ
                                 body = (
-                                    "雀魂 終局\n"
+                                    # "雀魂 終局\n"
                                     f"結果順位: {rank_txt}\n"
                                     f"最終スコア: {score_txt}\n"
                                     f"加算ポイント: {delta_txt}\n"
@@ -1098,6 +1095,12 @@ class PlaywrightController:
                                     run_auto_start_sequence(self.page)
                                 else:
                                     notify_log.warning("[auto-start] skipped by rank gate (post-game)")
+                                    body = (
+                                        "雀魂 依頼完了\n"
+                                        f"御依頼の段位ランクに到達しました。代打ちを終了します。"
+                                        f"時刻: {time.strftime('%Y/%m/%d %H:%M')}"
+                                    )
+                                    send_slack_message_api(message=body)
                             except Exception as e:
                                 logger.error(f"[gate] error: {e}")
 

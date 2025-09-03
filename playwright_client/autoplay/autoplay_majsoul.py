@@ -140,9 +140,9 @@ class AutoPlayMajsoul(object):
 
         # --- 打牌（自分の手番） ---
         if mjai_msg['type'] == 'dahai' and not self.bot.self_riichi_accepted:
-            wait = random.uniform(1.7, 2.0)
+            wait = random.uniform(2.0, 2.2)
             if not self.bot.last_kawa_tile:
-                wait = max(wait, 2.0)
+                wait = max(wait, 2.2)
             return_points = [Point(-1, -1, wait)]
             return_points += self.click_dahai(mjai_msg)
             return return_points

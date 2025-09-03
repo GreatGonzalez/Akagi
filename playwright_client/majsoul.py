@@ -35,7 +35,7 @@ SLACK_BOT_TOKEN  = os.getenv("SLACK_BOT_TOKEN", "xoxb-9401305398708-939767847229
 SLACK_CHANNEL_ID = os.getenv("SLACK_CHANNEL_ID", "C09BT8ZHYTE")
 
 # ★ 追加: 段位しきい値（≦なら開始）
-AKAGI_MAX_RANK_ID_4P = os.getenv("AKAGI_MAX_RANK_ID_4P", "10401")  # 例: "10401"（四麻 雀豪1 など）
+AKAGI_MAX_RANK_ID_4P = os.getenv("AKAGI_MAX_RANK_ID_4P", "10402")  # 例: "10401"（四麻 雀豪1 など）
 AKAGI_MAX_RANK_ID_3P = os.getenv("AKAGI_MAX_RANK_ID_3P")  # 例: "20302"（三麻 雀傑2 など）
 
 _PROOF_DIR = Path("logs/click_proof"); _PROOF_DIR.mkdir(parents=True, exist_ok=True)
@@ -1036,6 +1036,8 @@ class PlaywrightController:
                                     bonus = 20000
                                 elif rank == 3:
                                     bonus = 30000
+                                elif rank == 4:
+                                    bonus = 40000
 
                                 # delta の表示形式を調整 (+付き)
                                 delta_txt = "不明"

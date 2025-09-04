@@ -19,23 +19,28 @@ def _getf(name: str, default: float) -> float:
         return default
 
 # 鳴きUIが出るまでの“短い”待機（秒）
-NAKI_PREWAIT = _getf("AKAGI_NAKI_PREWAIT", 2.00)          # ← ここを 0.15〜0.30 で微調整
+NAKI_PREWAIT = _getf("AKAGI_NAKI_PREWAIT", 2.00)
 # リーチUIが出るまでの“短い”待機（秒）
-AKAGI_REACH_WAIT = _getf("AKAGI_REACH_WAIT", 2.00)          # ← ここを 0.15〜0.30 で微調整
+AKAGI_REACH_WAIT = _getf("AKAGI_REACH_WAIT", 1.00)
 # ロンUIが出るまでの“短い”待機（秒）
-AKAGI_RON_WAIT = _getf("AKAGI_RON_WAIT", 2.00)          # ← ここを 0.15〜0.30 で微調整
+AKAGI_RON_WAIT = _getf("AKAGI_RON_WAIT", 1.50)
 # ツモUIが出るまでの“短い”待機（秒）
-AKAGI_TSUMO_WAIT = _getf("AKAGI_TSUMO_WAIT", 2.00)          # ← ここを 0.15〜0.30 で微調整
+AKAGI_TSUMO_WAIT = _getf("AKAGI_TSUMO_WAIT", 1.50)
 # 鳴きボタン（ポン/チー/カン）クリックの直後待機（秒）
-NAKI_BUTTON_WAIT = _getf("AKAGI_NAKI_BUTTON_WAIT", 0.50)  # ← 0.06〜0.12 推奨
+NAKI_BUTTON_WAIT = _getf("AKAGI_NAKI_BUTTON_WAIT", 0.50)
 # 候補（チーの左中右など）クリックの直後待機（秒）
-NAKI_CAND_WAIT = _getf("AKAGI_NAKI_CAND_WAIT", 0.50)      # ← 0.05〜0.10 推奨
-# ボタンの“保険”ダブルクリック（0 or 1回）：1にすると二度押し
+NAKI_CAND_WAIT = _getf("AKAGI_NAKI_CAND_WAIT", 0.25)
+# ボタンの“保険”ダブルクリック（0 or 1回）
 NAKI_DOUBLE_CLICK = int(os.getenv("AKAGI_NAKI_DOUBLE_CLICK", "0"))
 
-NAKI_SINGLE_WAIT   = _getf("AKAGI_NAKI_SINGLE_WAIT", NAKI_CAND_WAIT)  # 候補1件でも待つ
+# 候補が1件でも待つ
+NAKI_SINGLE_WAIT   = _getf("AKAGI_NAKI_SINGLE_WAIT", NAKI_CAND_WAIT)
+# none 押下の空振り防止プリウェイト
+NAKI_NONE_PREWAIT  = _getf("AKAGI_NAKI_NONE_PREWAIT", 0.20)
 
-NAKI_NONE_PREWAIT = _getf("AKAGI_NAKI_NONE_PREWAIT", 0.15)  # 推奨 0.10〜0.20
+# ★追加: 親番の最初の打牌だけ遅らせる追加ウェイト（秒）
+AKAGI_OYA_FIRST_DAHAI_EXTRA = _getf("AKAGI_OYA_FIRST_DAHAI_EXTRA", 2.00)
+
 
 # Coordinates here is on the resolution of 16x9
 LOCATION = {
@@ -57,7 +62,7 @@ LOCATION = {
     ],
     "tsumo_space": 0.246875,
     "actions": [
-        (10.875, 7), #none
+        (10.875, 7), # none
         (8.6375, 7), # discard etc
         (6.4   , 7),
         (10.875, 5.9),
@@ -128,9 +133,33 @@ TILES = [
     "E","S","W","N","P","F","C",
 ]
 
+
 class AutoPlayMajsoul(object):
     def __init__(self):
         self.bot: AkagiBot = None
+        # 親番フラグ／「この局の最初の自分の打牌が終わったか」フラグ
+        self._is_oya: bool = False
+        self._first_discard_done: bool = True
+        # 追加: いま自分が親かを AkagiBot の内部状態から都度判定
+    def _is_oya_now(self) -> bool:
+        try:
+            dealer = getattr(self.bot, "_AkagiBot__dealer", None)
+            myid   = getattr(self.bot, "player_id", None)
+            return dealer is not None and myid is not None and int(dealer) == int(myid)
+        except Exception:
+            return False
+
+    # 追加: この局の「自分の最初の打牌」かどうか（= 自分の河が空か）
+    def _is_my_first_discard_this_hand(self) -> bool:
+        try:
+            rivers = getattr(self.bot, "_AkagiBot__rivers", None)
+            myid   = getattr(self.bot, "player_id", None)
+            if not isinstance(rivers, dict) or myid is None:
+                return False
+            my_river = rivers.get(myid, [])
+            return len(my_river) == 0
+        except Exception:
+            return False
 
     def act(self, mjai_msg: dict) -> list[Point]:
         if mjai_msg is None:
@@ -138,13 +167,44 @@ class AutoPlayMajsoul(object):
         logger.debug(f"Act: {mjai_msg}")
         logger.debug(f"reach_accepted: {self.bot.self_riichi_accepted}")
 
+        # ---- 局開始イベントでフラグをリセット＆親判定 ----
+        # mjai イベントに 'start_kyoku' が来たら:
+        #   - oya（0-3の座席ID）と self.bot.player_id を比較して親番判定
+        if mjai_msg.get("type") == "start_kyoku":
+            try:
+                oya = mjai_msg.get("oya", None)
+                myid = getattr(self.bot, "player_id", None)
+                self._is_oya = (oya is not None and myid is not None and int(oya) == int(myid))
+            except Exception:
+                self._is_oya = False
+            self._first_discard_done = False
+
         # --- 打牌（自分の手番） ---
         if mjai_msg['type'] == 'dahai' and not self.bot.self_riichi_accepted:
-            wait = random.uniform(2.0, 2.2)
+            wait = random.uniform(1.2, 1.5)
+
+            # 既存: 開幕（自分河が空）ならやや長め
             if not self.bot.last_kawa_tile:
-                wait = max(wait, 2.2)
+                wait = max(wait, 1.5)
+                try:
+                    if self._is_oya_now() and self._is_my_first_discard_this_hand():
+                        extra = max(0.0, AKAGI_OYA_FIRST_DAHAI_EXTRA)
+                        wait += extra
+                        logger.debug(f"[OYA-FIRST] extra wait applied: +{extra}s "
+                                    f"(dealer={getattr(self.bot, '_AkagiBot__dealer', None)}, "
+                                    f"me={getattr(self.bot, 'player_id', None)})")
+                except Exception as _e:
+                    logger.debug(f"[OYA-FIRST] check skipped due to: {_e}")
+
+            # ★親番 かつ この局で最初の自分打牌 かつ 開幕（河が空）→ 追加ウェイト
+            if self._is_oya and (not self._first_discard_done) and (not self.bot.last_kawa_tile):
+                wait += max(0.0, AKAGI_OYA_FIRST_DAHAI_EXTRA)
+
             return_points = [Point(-1, -1, wait)]
             return_points += self.click_dahai(mjai_msg)
+
+            # この局の最初の自分打牌が完了
+            self._first_discard_done = True
             return return_points
 
         if mjai_msg['type'] == 'dahai' and self.bot.self_riichi_accepted:
@@ -155,7 +215,7 @@ class AutoPlayMajsoul(object):
             'none','chi','pon','daiminkan','ankan','kakan',
             'hora','reach','ryukyoku','nukidora','zimo'
         ]:
-            # ※ ここでは pre-wait を入れない（実際に鳴くと決まった時だけ click_chiponkan 内で待つ）
+            # ※ pre-wait は click_chiponkan 側に集約
             return self.click_chiponkan(mjai_msg)
 
         return []
@@ -179,14 +239,13 @@ class AutoPlayMajsoul(object):
 
         operation_list.sort(key=lambda x: ACTION_PIORITY[x])
 
-        # hora を zimo 扱いへ補正
+        # hora を zimo 扱いへ補正（手牌枚数で自摸和了判定）
         if sum(self.bot.tehai_vec34) in [14, 11, 8, 5, 2] and mjai_msg['type'] == 'hora':
             mjai_msg['type'] = 'zimo'
 
-        naki_types = {'chi','pon','ankan','kakan'}  # ←「鳴き」に限定
+        naki_types = {'chi','pon','ankan','kakan'}  # 鳴きに限定
 
         # ---- まずは鳴き/和了/宣言ボタンを押す ----
-        # 鳴きの場合のみ、押す直前に pre-wait を入れる
         will_click = False
         target_idx = None
         for idx, operation in enumerate(operation_list):
@@ -196,14 +255,14 @@ class AutoPlayMajsoul(object):
                 break
 
         if not will_click:
-            return return_points  # そもそも押す対象がない
+            return return_points  # 押す対象なし
 
-        # ★ 鳴きのときだけ pre-wait を入れる（UIが出るラグを吸収）
+        # 鳴きのときだけ pre-wait（UI生成ラグ吸収）
         if mjai_msg['type'] in naki_types:
             pre = max(0.0, NAKI_PREWAIT)
             return_points.append(Point(-1, -1, pre))
         elif mjai_msg['type'] == 'none':
-            # パネル生成が間に合わず「空振り」するのを防ぐための保険
+            # 空振り防止の保険
             pre = max(0.0, NAKI_NONE_PREWAIT)
             return_points.append(Point(-1, -1, pre))
 
@@ -241,7 +300,7 @@ class AutoPlayMajsoul(object):
                 chi_candidates = sorted(self.bot.find_chi_consume_simple(), key=cmp_to_key(compare_tehai))
                 if len(chi_candidates) == 1:
                     return_points.append(Point(-1, -1, max(0.0, NAKI_SINGLE_WAIT + random.uniform(-0.02, 0.02))))
-                    return return_points  # 実クリックなし → 追加待機なし
+                    return return_points  # 実クリックなし → 追加待機のみ
                 for idx, chi_candidate in enumerate(chi_candidates):
                     if consumed_pais_mjai == chi_candidate:
                         candidate_idx = int((-(len(chi_candidates)/2)+idx+0.5)*2+5)
@@ -264,7 +323,7 @@ class AutoPlayMajsoul(object):
                 pon_candidates = self.bot.find_pon_consume_simple()
                 if len(pon_candidates) == 1:
                     return_points.append(Point(-1, -1, max(0.0, NAKI_SINGLE_WAIT + random.uniform(-0.02, 0.02))))
-                    return return_points  # 実クリックなし → 追加待機なし
+                    return return_points  # 実クリックなし → 追加待機のみ
                 # consumed と一致候補を優先（順不同のため正規化比較）
                 def _norm(lst): return sorted(lst, key=cmp_to_key(compare_pai))
                 target_norm = _norm(consumed_pais_mjai)
@@ -303,7 +362,6 @@ class AutoPlayMajsoul(object):
                         return return_points
 
         return return_points
-
 
     def get_pai_coord(self, idx: int, tehais: list[str]):
         tehai_count = len(tehais)

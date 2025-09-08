@@ -103,8 +103,8 @@ def choose_with_last_avoid(
         discards = [c for c in mortal_candidates if c.kind == "discard"]
         discards.sort(key=lambda c: (c.danger_score, -c.ev_point))
         best = discards[0]
-        log.info("[LAST-AVOID] FOLD plc=%d diff_up=%d risk=%.2f -> %s danger=%.2f(%s)",
-                 plc, diff_up, global_risk, best.tile, best.danger_score, bucketize(best.danger_score))
+        # log.info("[LAST-AVOID] FOLD plc=%d diff_up=%d risk=%.2f -> %s danger=%.2f(%s)",
+        #          plc, diff_up, global_risk, best.tile, best.danger_score, bucketize(best.danger_score))
         return best
 
     danger_th = cfg.danger_threshold_high if (plc == 4 or global_risk >= 1.2) else cfg.danger_threshold_low
@@ -112,12 +112,12 @@ def choose_with_last_avoid(
     safeish = [c for c in discards if c.danger_score <= danger_th]
     if safeish:
         best = max(safeish, key=lambda c: c.ev_point)
-        log.info("[LAST-AVOID] CTRL plc=%d diff_up=%d risk=%.2f th=%.2f -> %s danger=%.2f(%s) EV=%.3f",
-                 plc, diff_up, global_risk, danger_th, best.tile, best.danger_score, bucketize(best.danger_score), best.ev_point)
+        # log.info("[LAST-AVOID] CTRL plc=%d diff_up=%d risk=%.2f th=%.2f -> %s danger=%.2f(%s) EV=%.3f",
+        #          plc, diff_up, global_risk, danger_th, best.tile, best.danger_score, bucketize(best.danger_score), best.ev_point)
         return best
 
     discards.sort(key=lambda c: (c.danger_score, -c.ev_point))
     best = discards[0] if discards else max(mortal_candidates, key=lambda c: c.ev_point)
-    log.info("[LAST-AVOID] FORCE plc=%d diff_up=%d risk=%.2f -> %s danger=%.2f(%s) EV=%.3f",
-             plc, diff_up, global_risk, best.tile, getattr(best, "danger_score", 0.0), bucketize(getattr(best, "danger_score", 0.0)), best.ev_point)
+    # log.info("[LAST-AVOID] FORCE plc=%d diff_up=%d risk=%.2f -> %s danger=%.2f(%s) EV=%.3f",
+    #          plc, diff_up, global_risk, best.tile, getattr(best, "danger_score", 0.0), bucketize(getattr(best, "danger_score", 0.0)), best.ev_point)
     return best

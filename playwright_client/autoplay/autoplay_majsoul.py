@@ -28,7 +28,7 @@ def _geti(name: str, default: int) -> int:
 
 
 # --- Waits ---
-NAKI_PREWAIT = _getf("AKAGI_NAKI_PREWAIT", 2.00)
+NAKI_PREWAIT = _getf("AKAGI_NAKI_PREWAIT", 1.00)
 AKAGI_REACH_WAIT = _getf("AKAGI_REACH_WAIT", 1.00)
 AKAGI_RON_WAIT = _getf("AKAGI_RON_WAIT", 1.00)
 AKAGI_TSUMO_WAIT = _getf("AKAGI_TSUMO_WAIT", 1.00)
@@ -45,14 +45,14 @@ AKAGI_TENPAI_BIAS_OYA_SHANTEN2 = _geti("AKAGI_TENPAI_BIAS_OYA_SHANTEN2", 1)
 
 # --- Naki safety (simple & strong) ---
 AKAGI_NAKI_SAFETY_ENABLE = _geti("AKAGI_NAKI_SAFETY_ENABLE", 1)
-AKAGI_NAKI_SAFETY_JUNME_TIGHT = _geti("AKAGI_NAKI_SAFETY_JUNME_TIGHT", 9)  # earlier endgame
-AKAGI_NAKI_SAFETY_MIN_ANPAI = _geti("AKAGI_NAKI_SAFETY_MIN_ANPAI", 3)      # need >=3 safe tiles late
+AKAGI_NAKI_SAFETY_JUNME_TIGHT = _geti("AKAGI_NAKI_SAFETY_JUNME_TIGHT", 11)  # earlier endgame
+AKAGI_NAKI_SAFETY_MIN_ANPAI = _geti("AKAGI_NAKI_SAFETY_MIN_ANPAI", 2)      # need >=3 safe tiles late
 
 # --- Fold mode (simplified) ---
 AKAGI_FOLD_ENABLE = _geti("AKAGI_FOLD_ENABLE", 1)
-AKAGI_FOLD_SHANTEN_THRESH = _geti("AKAGI_FOLD_SHANTEN_THRESH", 3)
-AKAGI_FOLD_BADNESS_SCORE_THRESH = _geti("AKAGI_FOLD_BADNESS_SCORE_THRESH", 7)
-AKAGI_FOLD_EARLY_JUNME = _geti("AKAGI_FOLD_EARLY_JUNME", 7)
+AKAGI_FOLD_SHANTEN_THRESH = _geti("AKAGI_FOLD_SHANTEN_THRESH", 4)
+AKAGI_FOLD_BADNESS_SCORE_THRESH = _geti("AKAGI_FOLD_BADNESS_SCORE_THRESH", 8)
+AKAGI_FOLD_EARLY_JUNME = _geti("AKAGI_FOLD_EARLY_JUNME", 6)
 AKAGI_FOLD_RELEASE_SHANTEN = _geti("AKAGI_FOLD_RELEASE_SHANTEN", 1)
 AKAGI_FOLD_FORCE_ON_RIICHI = _geti("AKAGI_FOLD_FORCE_ON_RIICHI", 1)
 
@@ -82,8 +82,8 @@ AKAGI_NEAR_GAP_SMALL = _geti("AKAGI_NEAR_GAP_SMALL", 2000)
 # --- Riichi gate ---
 RIICHI_BASE_RISK = _getf("AKAGI_RIICHI_BASE_RISK", 0.10)
 RIICHI_DEALER_BONUS = _getf("AKAGI_RIICHI_DEALER_BONUS", 0.22)
-RIICHI_THREAT_PENALTY = _getf("AKAGI_RIICHI_THREAT_PENALTY", 0.32)
-RIICHI_PLACE_PENALTY = _getf("AKAGI_RIICHI_PLACE_PENALTY", 0.45)
+RIICHI_THREAT_PENALTY = _getf("AKAGI_RIICHI_THREAT_PENALTY", 0.26)
+RIICHI_PLACE_PENALTY = _getf("AKAGI_RIICHI_PLACE_PENALTY", 0.32)
 
 # --- Placement utility ---
 U1 = _getf("AKAGI_UTILITY_1ST", 30.0)
@@ -92,8 +92,8 @@ U3 = _getf("AKAGI_UTILITY_3RD", -15.0)
 U4 = _getf("AKAGI_UTILITY_4TH", -40.0)
 
 # --- Dora aggression ---
-AKAGI_MYDORA_RISK_PER_TILE = _getf("AKAGI_MYDORA_RISK_PER_TILE", 0.08)
-AKAGI_MYDORA_MAX_RISK_BONUS = _getf("AKAGI_MYDORA_MAX_RISK_BONUS", 0.22)
+AKAGI_MYDORA_RISK_PER_TILE = _getf("AKAGI_MYDORA_RISK_PER_TILE", 0.10)
+AKAGI_MYDORA_MAX_RISK_BONUS = _getf("AKAGI_MYDORA_MAX_RISK_BONUS", 0.28)
 
 # --- Somete (self) relax switches ---
 AKAGI_SOMETE_ENABLE = _geti("AKAGI_SOMETE_ENABLE", 1)
@@ -112,20 +112,20 @@ AKAGI_OYA_YAKUHAI_FORCE_PON = _geti("AKAGI_OYA_YAKUHAI_FORCE_PON", 1)
 
 # --- Naki progress override (取りこぼし救済) ---
 AKAGI_NAKI_PROGRESS_OVERRIDE_ENABLE = _geti("AKAGI_NAKI_PROGRESS_OVERRIDE_ENABLE", 1)
-AKAGI_NAKI_PROGRESS_MAX_JUNME = _geti("AKAGI_NAKI_PROGRESS_MAX_JUNME", 12)
-AKAGI_NAKI_PROGRESS_THREAT_MAX = _getf("AKAGI_NAKI_PROGRESS_THREAT_MAX", 0.70)
+AKAGI_NAKI_PROGRESS_MAX_JUNME = _geti("AKAGI_NAKI_PROGRESS_MAX_JUNME", 13)
+AKAGI_NAKI_PROGRESS_THREAT_MAX = _getf("AKAGI_NAKI_PROGRESS_THREAT_MAX", 0.90)
 
 # --- Somete progress override (自分の染め手で“鳴けば前進”を救う) ---
 AKAGI_SOMETE_PROGRESS_OVERRIDE_ENABLE = _geti("AKAGI_SOMETE_PROGRESS_OVERRIDE_ENABLE", 1)
 AKAGI_SOMETE_PROGRESS_MAX_JUNME = _geti("AKAGI_SOMETE_PROGRESS_MAX_JUNME", 12)
-AKAGI_SOMETE_PROGRESS_THREAT_MAX = _getf("AKAGI_SOMETE_PROGRESS_THREAT_MAX", 0.60)
+AKAGI_SOMETE_PROGRESS_THREAT_MAX = _getf("AKAGI_SOMETE_PROGRESS_THREAT_MAX", 0.90)
 AKAGI_SOMETE_PROGRESS_RELAX_ANPAI = _geti("AKAGI_SOMETE_PROGRESS_RELAX_ANPAI", 1)
 
 # --- Naki Chain (連鎖鳴き) overrides ---
 AKAGI_NAKI_CHAIN_ENABLE = _geti("AKAGI_NAKI_CHAIN_ENABLE", 1)
-AKAGI_NAKI_CHAIN_MAX = _geti("AKAGI_NAKI_CHAIN_MAX", 2)
-AKAGI_NAKI_CHAIN_WINDOW_JUNME = _geti("AKAGI_NAKI_CHAIN_WINDOW_JUNME", 2)
-AKAGI_NAKI_CHAIN_THREAT_MAX = _getf("AKAGI_NAKI_CHAIN_THREAT_MAX", 0.65)
+AKAGI_NAKI_CHAIN_MAX = _geti("AKAGI_NAKI_CHAIN_MAX", 3)
+AKAGI_NAKI_CHAIN_WINDOW_JUNME = _geti("AKAGI_NAKI_CHAIN_WINDOW_JUNME", 3)
+AKAGI_NAKI_CHAIN_THREAT_MAX = _getf("AKAGI_NAKI_CHAIN_THREAT_MAX", 0.85)
 AKAGI_NAKI_CHAIN_RELAX_ANPAI = _geti("AKAGI_NAKI_CHAIN_RELAX_ANPAI", 1)
 
 # --- KAN policy switches ---
@@ -139,15 +139,29 @@ AKAGI_KAN_MIN_ANPAI_VS_RIICHI = _geti("AKAGI_KAN_MIN_ANPAI_VS_RIICHI", 2)
 AKAGI_KAN_ALLOW_IF_ANTI_LAST   = _geti("AKAGI_KAN_ALLOW_IF_ANTI_LAST", 1)
 AKAGI_KAN_ALLOW_IF_SOMETE      = _geti("AKAGI_KAN_ALLOW_IF_SOMETE", 1)
 AKAGI_KAN_ALLOW_IF_NEED_BIG    = _geti("AKAGI_KAN_ALLOW_IF_NEED_BIG", 1)
-AKAGI_ANKAN_MIN_SHANTEN   = _geti("AKAGI_ANKAN_MIN_SHANTEN", 1)
+AKAGI_ANKAN_MIN_SHANTEN   = _geti("AKAGI_ANKAN_MIN_SHANTEN", 0)
 AKAGI_KAKAN_REQUIRE_TENPAI = _geti("AKAGI_KAKAN_REQUIRE_TENPAI", 1)
-AKAGI_KAKAN_MIN_SHAPE_GOOD = _getf("AKAGI_KAKAN_MIN_SHAPE_GOOD", 0.60)
+AKAGI_KAKAN_MIN_SHAPE_GOOD = _getf("AKAGI_KAKAN_MIN_SHAPE_GOOD", 0.50)
 AKAGI_DMK_EARLY_JUNME     = _geti("AKAGI_DMK_EARLY_JUNME", 6)
 
 # --- OYA-TENPAI 強化用 knobs（追加） ---
 AKAGI_OYA_TENPAI_FORCE_ENABLE = _geti("AKAGI_OYA_TENPAI_FORCE_ENABLE", 1)
 AKAGI_OYA_TENPAI_FORCE_THREAT = _getf("AKAGI_OYA_TENPAI_FORCE_THREAT", 0.55)
 AKAGI_OYA_TENPAI_FORCE_GAIN   = _getf("AKAGI_OYA_TENPAI_FORCE_GAIN", 0.0)  # 受け入れ増などの閾値補助（0で無効）
+
+# --- Naki EV placement-aware knobs (NEW) ---
+AKAGI_NAKI_NEG_EV_TOL_BASE  = _getf("AKAGI_NAKI_NEG_EV_TOL_BASE", 250.0)   # 負EV許容の基礎
+AKAGI_NAKI_NEG_EV_TOL_PLACE = _getf("AKAGI_NAKI_NEG_EV_TOL_PLACE", 1000.0)   # 着順圧で増える許容
+AKAGI_NAKI_TENPAI_BONUS     = _getf("AKAGI_NAKI_TENPAI_BONUS", 900.0)       # 鳴いてテンパイ到達ボーナス
+AKAGI_RYUUKYOKU_TENPAI_VALUE= _getf("AKAGI_RYUUKYOKU_TENPAI_VALUE", 1500.0) # 終盤ノーテン罰符回避の価値
+
+# （任意）Anti-Last中はリーチ現物要件を1段階ゆるめるか
+AKAGI_NAKI_SAFETY_RELAX_VS_RIICHI_IN_ANTI_LAST = _geti("AKAGI_NAKI_SAFETY_RELAX_VS_RIICHI_IN_ANTI_LAST", 1)
+
+AKAGI_LAST_PUSH_ENABLE           = _geti("AKAGI_LAST_PUSH_ENABLE", 1)
+AKAGI_LAST_PUSH_THREAT_MAX       = _getf("AKAGI_LAST_PUSH_THREAT_MAX", 0.80)   # この脅威度までは押す
+AKAGI_LAST_RIICHI_MIN_POINT      = _getf("AKAGI_LAST_RIICHI_MIN_POINT", 1500)  # ダマ期待打点がこの程度でも押す
+AKAGI_LAST_RIICHI_MIN_GOOD       = _getf("AKAGI_LAST_RIICHI_MIN_GOOD", 0.35)   # 好形率しきい値（0..1）
 
 
 # Coordinates here is on the resolution of 16x9
@@ -266,6 +280,42 @@ class AutoPlayMajsoul(object):
         # === 新規学習系・推定器の内部キャッシュ ===
         self._ev_cache = {}
         self._opp_cache = {}
+
+    def _placement_weight(self) -> float:
+        """
+        着順圧（0..1）。そのままだと強いので鳴き用の重み係数に。
+        """
+        try:
+            return clamp(self._placement_pressure(), 0.0, 1.0)
+        except Exception:
+            return 0.3
+
+    def _would_tenpai_by_call(self, naki_type: str) -> bool:
+        """
+        超簡易：シャンテン1なら鳴きでテンパイ到達“しやすい”とみなす。
+        親シャンテン2緩和とも整合（既存ポリシーに寄せる）。
+        """
+        sh = self._get_shanten_safe()
+        if sh is None:
+            return False
+        if sh == 1 and naki_type in ("chi","pon"):
+            return True
+        if sh == 2 and self._is_oya and AKAGI_TENPAI_BIAS_OYA_SHANTEN2 and naki_type in ("chi","pon"):
+            return True
+        return False
+
+    def _neg_ev_tolerance_for_naki(self, naki_type: str) -> float:
+        """
+        “どれくらいの負EVまで鳴きを許容するか”を着順圧・状況から決める。
+        """
+        w = self._placement_weight()  # 0..1
+        sh = self._get_shanten_safe() or 9
+        tol = AKAGI_NAKI_NEG_EV_TOL_BASE + AKAGI_NAKI_NEG_EV_TOL_PLACE * w
+        if self._anti_last_active() or self._oya_endgame_push_active() or self._is_all_last_like():
+            tol *= 1.50
+        if sh <= 1:
+            tol += 200.0
+        return max(0.0, tol)
 
     # ---- helpers: 状態参照 ----
     def _is_oya_now(self) -> bool:
@@ -739,6 +789,9 @@ class AutoPlayMajsoul(object):
                 return True
         elif myd == 0:
             if not self._is_oya and shanten >= 2:
+                # ラス回避・南場は“0ドラでも”速度優先で許容
+                if self._anti_last_active() or self._is_all_last_like():
+                    return True
                 return False
 
         # 通常（親はやや緩い）
@@ -774,8 +827,15 @@ class AutoPlayMajsoul(object):
             if riichi_ids:
                 ok_any = any(self._is_genbutsu_to(rid, pai) for rid in riichi_ids)
                 if not ok_any:
-                    logger.debug(f"[NAKI-SAFETY] decline: not genbutsu to any riichi seat, pai={pai}")
-                    return False
+                    if AKAGI_NAKI_SAFETY_RELAX_VS_RIICHI_IN_ANTI_LAST and self._anti_last_active():
+                        if self.tile_danger(pai) <= 0.10:
+                            logger.debug(f"[NAKI-SAFETY] relaxed by anti-last (pai={pai}, danger<=0.10)")
+                        else:
+                            logger.debug(f"[NAKI-SAFETY] decline: not genbutsu vs riichi, pai={pai}")
+                            return False
+                    else:
+                        logger.debug(f"[NAKI-SAFETY] decline: not genbutsu to any riichi seat, pai={pai}")
+                        return False
 
             # 2) 終盤×安牌ストック＋候補危険度
             if junme is not None and junme >= AKAGI_NAKI_SAFETY_JUNME_TIGHT:
@@ -861,7 +921,15 @@ class AutoPlayMajsoul(object):
             )
             myd = self._my_dora_count()
             bonus = clamp(AKAGI_MYDORA_RISK_PER_TILE * float(myd), 0.0, AKAGI_MYDORA_MAX_RISK_BONUS)
-            return clamp(base + bonus, -0.4, 0.8)
+            # ラス目・Anti-Last中はリスク予算を上乗せしてリーチ寄りに
+            try:
+                rank, gap_to_third, _ = self._rank_and_gaps()
+            except Exception:
+                rank = None
+            last_push = (rank == 4) or self._anti_last_active() or self._is_all_last_like()
+            if last_push:
+                bonus += 0.12
+            return clamp(base + bonus, -0.4, 0.85)
         except Exception:
             return 0.0
 
@@ -875,8 +943,8 @@ class AutoPlayMajsoul(object):
             myd = self._my_dora_count()
 
             shanten = self._get_shanten_safe() or 3
-            base = 1300 if shanten >= 2 else 2000
-            bonus = 900*myd + 200*red_n
+            base = 1400 if shanten >= 2 else 2100
+            bonus = 1050*myd + 250*red_n
             return float(base + bonus)
         except Exception:
             return 2200.0
@@ -938,30 +1006,58 @@ class AutoPlayMajsoul(object):
 
     def estimate_meld_ev_gain(self, mjai_msg: dict) -> float:
         """
-        鳴き EV 差分（簡易）：速度の上昇 − 打点低下 − 情報露出による失点増
+        鳴き EV 差分：速度↑（勝率UP） − 打点↓ − 危険度コスト ＋ 着順圧で増える“テンパイ価値/罰符回避”
         """
         try:
             ntype = mjai_msg.get("type")
             if ntype not in ("chi","pon"):
                 return 0.0
+
             sh = self._get_shanten_safe()
             if sh is None:
                 return 0.0
+
             point = self._estimate_hand_value()
+
+            # 速度起因の和了率上昇（簡易）
             if sh >= 2:
                 win_up = 0.06
             elif sh == 1:
                 win_up = 0.12
             else:
                 win_up = 0.02
+
+            # 打点低下（現行ロジックを踏襲）
             down = 0.15 * point
-            danger = 120.0 * (1.0 + 0.4*len(self._riichi_seat_ids()))
-            delta = win_up*point - down - danger
-            logger.debug(f"[EV] meld delta≈{delta:.0f} (win_up={win_up:.2f}, point={point:.0f}, danger={danger:.0f})")
-            return delta
+
+            # 危険度：牌危険度×係数×リーチ人数で可変（定数120→可変へ）
+            called_tile = self._normalize_pai(mjai_msg.get("pai", ""))
+            dang = self.tile_danger(called_tile)  # 0..1
+            riichi_n = len(self._riichi_seat_ids())
+            danger = (900.0 * dang) * (1.0 + 0.5*riichi_n)
+
+            # 着順圧（ラス回避）で重み付けする“テンパイ価値”と“ノーテン罰符回避価値”
+            w = self._placement_weight()  # 0..1
+            tenpai_bonus = 0.0
+            if self._would_tenpai_by_call(ntype):
+                tenpai_bonus += AKAGI_NAKI_TENPAI_BONUS * (1.0 + 0.6*w)
+
+            # 終盤の形式テンパイ価値（ノーテン罰符回避）
+            j = self._junme() or 0
+            late = clamp((j - 10)/4.0, 0.0, 1.0)  # 10巡目以降で立ち上がる
+            ryuukyoku_value = late * AKAGI_RYUUKYOKU_TENPAI_VALUE * (0.5 + 0.5*w)
+
+            delta = win_up*point - down - danger + tenpai_bonus + ryuukyoku_value
+
+            logger.debug(f"[EV] meld delta≈{delta:.0f} "
+                         f"(win_up={win_up:.2f}, point={point:.0f}, "
+                         f"danger≈{danger:.0f}(dang={dang:.2f},riichi={riichi_n}), "
+                         f"+tenpai={tenpai_bonus:.0f}, +ryuukyoku={ryuukyoku_value:.0f})")
+            return float(delta)
         except Exception as _e:
             logger.debug(f"[EV] meld gain est error: {_e}")
             return 0.0
+
 
     def estimate_kan_ev_delta(self, ktype: str) -> float:
         """
@@ -1024,6 +1120,20 @@ class AutoPlayMajsoul(object):
             dist = self.estimate_hand_point_dist()
             mangan_boost = 1.0 + 0.25*dist.get("p_mangan", 0.0)
 
+            # --- 南場ラス目/オーラス系の“先にリーチする”強制ゲート ---
+            try:
+                rank, _, _ = self._rank_and_gaps()
+            except Exception:
+                rank = None
+            if (
+                AKAGI_LAST_PUSH_ENABLE
+                and (self._anti_last_active() or self._is_all_last_like() or rank == 4)
+                and threat <= AKAGI_LAST_PUSH_THREAT_MAX
+                and (good >= AKAGI_LAST_RIICHI_MIN_GOOD or e_points >= AKAGI_LAST_RIICHI_MIN_POINT)
+            ):
+                logger.debug("[RIICHI] last-push override -> RIICHI")
+                return "riichi"
+
             # 宣言後の被弾上昇
             deal_in_rate = clamp(0.08 + 0.10*threat - 0.02*good + 0.02*max(0, junme-10), 0.02, 0.27)
             deal_in_rate_riichi = clamp(deal_in_rate + 0.03*threat, 0.02, 0.33)
@@ -1038,13 +1148,13 @@ class AutoPlayMajsoul(object):
 
             EV_riichi = win_rate_riichi*point_riichi + (-deal_in_rate_riichi)*(-4000.0)
             EV_dama   = win_rate_dama*point_dama     + (-deal_in_rate)*(-3500.0)
-            EV_fold   = -500.0 * place_p
+            EV_fold   = (-500.0 - (400.0 if (rank == 4 or self._anti_last_active()) else 0.0)) * place_p
 
             # 将来拡張フック
             EV_riichi += 0.2 * self.simulate_ev_for_action("riichi")
             EV_dama   += 0.2 * self.simulate_ev_for_action("dama")
 
-            gate = 0.1 - 0.6* clamp(risk, -0.4, 0.8)
+            gate = 0.1 - 0.6* clamp(risk, -0.4, 0.85)
             myd = self._my_dora_count()
             gate -= 0.02 * max(0, myd - 1)
 
@@ -1408,10 +1518,15 @@ class AutoPlayMajsoul(object):
                         logger.debug(f"[TENPAI+SAFETY] decline {mjai_msg['type']} by safety")
                         mjai_msg = dict(mjai_msg); mjai_msg['type'] = 'none'
                     else:
-                        # EV 比較
+                        # EV 比較（NEW: 負EV許容窓つき）
                         delta = self.estimate_meld_ev_gain(mjai_msg)
-                        if delta <= 0.0:
-                            # --- 進行オーバーライド（従来ロジック） ---
+                        tol = self._neg_ev_tolerance_for_naki(mjai_msg.get('type'))
+
+                        if delta < 0.0 and (-delta) <= tol:
+                            logger.debug(f"[EV] accept {mjai_msg['type']} by NEG-EV tolerance "
+                                         f"(delta={delta:.0f}, tol={tol:.0f}, placeW={self._placement_weight():.2f})")
+                        elif delta <= 0.0:
+                            # --- 進行オーバーライド（従来） ---
                             junme = self._junme() or 0
                             threat = self._threat_level()
                             allow_progress = (
@@ -1424,10 +1539,11 @@ class AutoPlayMajsoul(object):
                                 logger.debug(f"[NAKI-PROGRESS] override accept {mjai_msg['type']} "
                                              f"(sh={self._get_shanten_safe()}, junme={junme}, threat={threat:.2f}, delta={delta:.0f})")
                             else:
-                                logger.debug(f"[TENPAI] decline {mjai_msg['type']} (oya={self._is_oya}, shanten={self._get_shanten_safe()}, delta={delta:.0f})")
+                                logger.debug(f"[TENPAI] decline {mjai_msg['type']} (sh={self._get_shanten_safe()}, delta={delta:.0f})")
                                 mjai_msg = dict(mjai_msg); mjai_msg['type'] = 'none'
                         else:
                             logger.debug(f"[EV] accept {mjai_msg['type']} (delta={delta:.0f})")
+
 
                 # --- 親テンパイ強制（yakuhai面子＋追加で0シャンテン見込） ---
                 try:

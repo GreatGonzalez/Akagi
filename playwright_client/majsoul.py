@@ -31,7 +31,7 @@ AKAGI_DEBUG_NOTIFY        = os.getenv("AKAGI_DEBUG_NOTIFY", "0") == "1"
 LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "+qrM74c/z/cvE7GAi1ul9+Zpwv78TQW42f6E708XYen1M6qiFQX7FTB57Z6vwxgVgS8jH0g9jJdjTQtV3PEHJMwdyZjgpvVt92BhQ0KOujah+J/fNGK7jYrbswtObHQ+wn3m14rQZQKdKsRDvouCtgdB04t89/1O/w1cDnyilFU=")
 LINE_USER_ID              = os.getenv("LINE_USER_ID", "U1c2db82d9871049d72d5e26feeb7eb19")
 
-SLACK_BOT_TOKEN  = os.getenv("SLACK_BOT_TOKEN", "")
+SLACK_BOT_TOKEN  = os.getenv("SLACK_BOT_TOKEN", "xoxb-9401305398708-9397678472290-hPiRJGAY7nQhhcNWC3em0jIi")
 SLACK_CHANNEL_ID = os.getenv("SLACK_CHANNEL_ID", "C09BT8ZHYTE")
 
 # ★ 追加: 段位しきい値（≦なら開始）
@@ -1098,8 +1098,8 @@ class PlaywrightController:
                                 else:
                                     notify_log.warning("[auto-start] skipped by rank gate (post-game)")
                                     body = (
-                                        "雀魂 依頼完了\n"
-                                        f"御依頼の段位ランクに到達しました。代打ちを終了します。"
+                                        "【代行完了】\n"
+                                        f"目的の段位に到達しました。\n代打ちを終了します。\n"
                                         f"時刻: {time.strftime('%Y/%m/%d %H:%M')}"
                                     )
                                     send_slack_message_api(message=body)
@@ -1272,14 +1272,6 @@ def run_auto_start_sequence(page: Page) -> None:
     logger.info("[auto-start] begin")
     page.wait_for_timeout(10_000)
 
-    # お守り対策
-    # _ensure_viewport(page, need_w=666+10, need_h=700+10)
-    # _snap_with_marker(page, 666, 700, "end4_marker")
-    # page.mouse.click(666, 700)
-    # page.wait_for_timeout(2_000)
-    # page.mouse.click(666, 700)
-    # _snap(page, "after_tap4")
-
     # 段位戦
     _ensure_viewport(page, need_w=900+10, need_h=180+10)
     # _snap_with_marker(page, 900, 180, "start1_ranked")
@@ -1288,13 +1280,11 @@ def run_auto_start_sequence(page: Page) -> None:
 
     # 金の間（必要なら）
     # _ensure_viewport(page, need_w=900+10, need_h=500+10)
-    # # _snap_with_marker(page, 900, 600, "start2_king")
     # page.mouse.click(900, 500)
     # page.wait_for_timeout(3_000)
 
     # 王の間（本コードではこちらを選択）
     _ensure_viewport(page, need_w=900+10, need_h=600+10)
-    # # _snap_with_marker(page, 900, 600, "start2_king")
     page.mouse.click(900, 600)
     page.wait_for_timeout(3_000)
 

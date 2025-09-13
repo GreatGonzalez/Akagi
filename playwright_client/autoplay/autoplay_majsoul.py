@@ -164,6 +164,26 @@ AKAGI_LAST_RIICHI_MIN_POINT      = _getf("AKAGI_LAST_RIICHI_MIN_POINT", 1500)  #
 AKAGI_LAST_RIICHI_MIN_GOOD       = _getf("AKAGI_LAST_RIICHI_MIN_GOOD", 0.35)   # 好形率しきい値（0..1）
 
 
+AKAGI_RIICHI_MIN_ANPAI      = _geti("AKAGI_RIICHI_MIN_ANPAI", 2)     # リーチ前に欲しい安牌枚数
+AKAGI_RIICHI_THREAT_MAX     = _getf("AKAGI_RIICHI_THREAT_MAX", 0.70) # これ超えたら基本ダマ/降り寄り
+AKAGI_RIICHI_GOOD_MIN       = _getf("AKAGI_RIICHI_GOOD_MIN", 0.40)   # 好形レートがこれ未満はダマ寄り
+AKAGI_NAKI_NEG_EV_TOL_FLOOR = _getf("AKAGI_NAKI_NEG_EV_TOL_FLOOR", 120.0) # 負EV許容の下限
+AKAGI_HOUJUU_TARGET_RATE    = _getf("AKAGI_HOUJUU_TARGET_RATE", 0.13)    # 目標放銃率
+AKAGI_STATS_ALPHA           = _getf("AKAGI_STATS_ALPHA", 0.12)           # EMAの係数
+
+AKAGI_TOP_RESERVE_SAFE_ENABLE = _geti("AKAGI_TOP_RESERVE_SAFE_ENABLE", 1)
+AKAGI_TOP_RESERVE_SAFE_MIN    = _geti("AKAGI_TOP_RESERVE_SAFE_MIN", 1)   # トップ時に抱える安牌候補の最低枚数
+AKAGI_IPPATSU_AVOID_ENABLE    = _geti("AKAGI_IPPATSU_AVOID_ENABLE", 1)   # リーチ直後はまず現物で一発回避
+
+AKAGI_DEALER_RELAX_TOPSAFE_FACTOR   = _getf("AKAGI_DEALER_RELAX_TOPSAFE_FACTOR", 0.5) # 親番時はトップ安全ストック数をこの係数で緩和
+AKAGI_DEALER_RELAX_IPPATSU_ENABLE   = _geti("AKAGI_DEALER_RELAX_IPPATSU_ENABLE", 1)   # 親番・好条件なら一発回避を“しない”ことを許容
+AKAGI_DEALER_IPPATSU_GOOD_MIN       = _getf("AKAGI_DEALER_IPPATSU_GOOD_MIN", 0.50)    # 好形が良いときは押し優先
+AKAGI_DEALER_IPPATSU_THREAT_MAX     = _getf("AKAGI_DEALER_IPPATSU_THREAT_MAX", 0.55)  # 脅威度が低いときは押し優先
+
+AKAGI_ORAS_NEED_BIG_DISABLE_SAFETY  = _geti("AKAGI_ORAS_NEED_BIG_DISABLE_SAFETY", 1)  # オーラスで大きな打点が必要ならリーチ安全ペナルティを解除
+AKAGI_ORAS_DISABLE_TOPSAFE_WHEN_NEED_BIG = _geti("AKAGI_ORAS_DISABLE_TOPSAFE_WHEN_NEED_BIG", 1) # 同上：トップ安全ストックも解除
+AKAGI_ORAS_DISABLE_IPPATSU_WHEN_NEED_BIG = _geti("AKAGI_ORAS_DISABLE_IPPATSU_WHEN_NEED_BIG", 1) # 同上：一発回避も解除
+
 # Coordinates here is on the resolution of 16x9
 LOCATION = {
     "tiles": [
@@ -281,6 +301,103 @@ class AutoPlayMajsoul(object):
         self._ev_cache = {}
         self._opp_cache = {}
 
+        self._ema_naki = 0.0
+        self._ema_riichi = 0.0
+        self._ema_houjuu = 0.0
+        self._stats_initialized = False
+
+    # 相手毎に「その相手の現物」になり得る牌セット
+    def _opponent_genbutsu_sets(self) -> dict[int, set[str]]:
+        res = {}
+        try:
+            for seat in range(4):
+                if seat == self._my_seat():
+                    continue
+                rv = self._rivers().get(seat, []) or []
+                res[seat] = set(self._normalize_pai(t) for t in rv)
+        except Exception:
+            pass
+        return res
+
+    # 事前の「複数相手カバー」安牌候補を評価（多人数に対して現物になりやすい牌）
+    def _multi_cover_safe_candidates(self) -> list[str]:
+        try:
+            hand = [self._normalize_pai(p) for p in getattr(self.bot, "tehai_mjai", [])]
+            cov = self._opponent_genbutsu_sets()
+            scores = []
+            for t in hand:
+                # その牌を現物として持っている相手の人数（将来誰がリーチしても刺さりにくい）
+                cover_n = sum(1 for s in cov.values() if t in s)
+                # 字牌は総じて扱いやすいので微ボーナス
+                honor_bonus = 0.3 if t in ("E","S","W","N","P","F","C") else 0.0
+                scores.append((cover_n + honor_bonus, t))
+            scores.sort(reverse=True)  # カバー人数が多い順
+            # 上位を返す（重複排除）
+            ordered = []
+            seen = set()
+            for _, t in scores:
+                if t not in seen:
+                    seen.add(t)
+                    ordered.append(t)
+            return ordered
+        except Exception:
+            return []
+
+    # 現在リーチしている相手の「現物」集合（イッパツ回避で最優先）
+    def _genbutsu_vs_any_riichi(self) -> list[str]:
+        try:
+            riichis = self._riichi_seat_ids()
+            if not riichis:
+                return []
+            cov = self._opponent_genbutsu_sets()
+            # いずれかのリーチ者に対して現物な牌
+            safe = set()
+            for rid in riichis:
+                safe |= cov.get(rid, set())
+            # 手牌に存在するものだけ返す
+            hand = [self._normalize_pai(p) for p in getattr(self.bot, "tehai_mjai", [])]
+            return [t for t in hand if t in safe]
+        except Exception:
+            return []
+
+    def _ema_update(self, value: float, prev: float) -> float:
+        a = AKAGI_STATS_ALPHA
+        return (1.0 - a) * prev + a * value
+
+    # メッセージを見てEMA更新（簡易: 行動が出た瞬間に+、放銃はhoraでtarget==自分）
+    def _telemetry_feed(self, mjai_msg: dict):
+        try:
+            t = mjai_msg.get("type")
+            me = self._my_seat()
+            if t in ("chi","pon"):
+                self._ema_naki = self._ema_update(1.0, self._ema_naki)
+            else:
+                self._ema_naki = self._ema_update(0.0, self._ema_naki)
+
+            if t == "reach" and getattr(self.bot, "can_riichi", False):
+                self._ema_riichi = self._ema_update(1.0, self._ema_riichi)
+            else:
+                self._ema_riichi = self._ema_update(0.0, self._ema_riichi)
+
+            if t == "hora":
+                actor = mjai_msg.get("actor")
+                target = mjai_msg.get("target")  # 放銃された側
+                if target is not None and me is not None and int(target) == int(me) and actor != me:
+                    self._ema_houjuu = self._ema_update(1.0, self._ema_houjuu)
+                else:
+                    self._ema_houjuu = self._ema_update(0.0, self._ema_houjuu)
+        except Exception:
+            pass
+
+    # 直近の放銃率に応じて「負EV鳴き許容」を締める係数
+    def _neg_ev_dynamic_shrink(self) -> float:
+        try:
+            # 目標超過分だけ許容を縮める (例: 放銃EMA=0.20, 目標=0.12 -> over=0.08 => factor ~ 1/(1+0.8)=0.56)
+            over = max(0.0, self._ema_houjuu - AKAGI_HOUJUU_TARGET_RATE)
+            return 1.0 / (1.0 + 10.0 * over)
+        except Exception:
+            return 1.0
+
     def _placement_weight(self) -> float:
         """
         着順圧（0..1）。そのままだと強いので鳴き用の重み係数に。
@@ -315,6 +432,8 @@ class AutoPlayMajsoul(object):
             tol *= 1.50
         if sh <= 1:
             tol += 200.0
+        tol *= self._neg_ev_dynamic_shrink()
+        tol = max(AKAGI_NAKI_NEG_EV_TOL_FLOOR, tol)
         return max(0.0, tol)
 
     # ---- helpers: 状態参照 ----
@@ -1149,6 +1268,23 @@ class AutoPlayMajsoul(object):
             EV_riichi = win_rate_riichi*point_riichi + (-deal_in_rate_riichi)*(-4000.0)
             EV_dama   = win_rate_dama*point_dama     + (-deal_in_rate)*(-3500.0)
             EV_fold   = (-500.0 - (400.0 if (rank == 4 or self._anti_last_active()) else 0.0)) * place_p
+            anpai_cnt = self._count_anpai_against_riichi()
+            threat    = self._threat_level()
+            good      = self._good_shape_rate()
+            # リーチ“宣言リスク”のペナルティをEV側に反映（安牌不足＆高脅威ほど大）
+            safety_pen = 0.0
+            if anpai_cnt < AKAGI_RIICHI_MIN_ANPAI:
+                safety_pen += 900.0 * (AKAGI_RIICHI_MIN_ANPAI - anpai_cnt)
+            if threat >= AKAGI_RIICHI_THREAT_MAX:
+                safety_pen += 1200.0 * (threat - AKAGI_RIICHI_THREAT_MAX)
+            if good < AKAGI_RIICHI_GOOD_MIN:
+                safety_pen += 600.0 * (AKAGI_RIICHI_GOOD_MIN - good)
+            # --- Oras override: オーラスで“大きい手が必要”なら安全ペナルティを解除/軽減 ---
+            need_big_oras = self._is_all_last_like() and self._need_big_hand_for_rankup()
+            if need_big_oras and AKAGI_ORAS_NEED_BIG_DISABLE_SAFETY:
+                pass  # 完全解除
+            else:
+                EV_riichi -= safety_pen
 
             # 将来拡張フック
             EV_riichi += 0.2 * self.simulate_ev_for_action("riichi")
@@ -1166,8 +1302,12 @@ class AutoPlayMajsoul(object):
             logger.debug(f"[RIICHI] EV_r={EV_riichi:.0f}, EV_d={EV_dama:.0f}, EV_f={EV_fold:.0f}, "
                          f"risk={risk:.2f}, threat={threat:.2f}, placeP={place_p:.2f}, gate={gate:.2f}, myd={myd}, "
                          f"good={good:.2f}, dist_pman={dist.get('p_mangan',0):.2f}")
+            # --- Oras override: gate も下げて「勝ちに行く」リーチを通しやすく ---
+            if need_big_oras and AKAGI_ORAS_NEED_BIG_DISABLE_SAFETY:
+                gate = min(gate, -0.20)  # 僅差でもリーチを選びやすく
 
             best = max(EV_riichi, EV_dama, EV_fold)
+
             if best == EV_riichi and (EV_riichi - max(EV_dama, EV_fold)) > gate:
                 return "riichi"
             if best == EV_dama and (EV_dama - EV_fold) > -0.1:
@@ -1374,6 +1514,7 @@ class AutoPlayMajsoul(object):
             return []
         logger.debug(f"Act: {mjai_msg}")
         logger.debug(f"reach_accepted: {self.bot.self_riichi_accepted}")
+        self._telemetry_feed(mjai_msg)
 
         # ---- 局開始イベントでフラグをリセット＆親判定 ----
         if mjai_msg.get("type") == "start_kyoku":
@@ -1524,7 +1665,7 @@ class AutoPlayMajsoul(object):
 
                         if delta < 0.0 and (-delta) <= tol:
                             logger.debug(f"[EV] accept {mjai_msg['type']} by NEG-EV tolerance "
-                                         f"(delta={delta:.0f}, tol={tol:.0f}, placeW={self._placement_weight():.2f})")
+                                         f"(delta={delta:.0f}, tol={tol:.0f}, houjuuEMA={self._ema_houjuu:.2f})")
                         elif delta <= 0.0:
                             # --- 進行オーバーライド（従来） ---
                             junme = self._junme() or 0
@@ -1799,6 +1940,79 @@ class AutoPlayMajsoul(object):
         except Exception as _e:
             logger.debug(f"[SOMETE-CARE] overall care error: {_e}")
 
+        try:
+            rank, _, _ = self._rank_and_gaps()
+        except Exception:
+            rank = None
+        dealer = bool(self._is_oya)
+        oras_need_big = self._is_all_last_like() and self._need_big_hand_for_rankup()
+ 
+
+        # ---- 1) リーチが入っているなら：まず現物で一発回避（ADD） ----
+        try:
+            if self._riichi_seat_ids():
+                # オーラスで大物手が必要 → 一発回避を“解除”可能
+                if oras_need_big and AKAGI_ORAS_DISABLE_IPPATSU_WHEN_NEED_BIG:
+                    pass  # 解除：そのまま押す
+                else:
+                    # 親番・好条件なら一発回避“しない”緩和
+                    if dealer and AKAGI_DEALER_RELAX_IPPATSU_ENABLE:
+                        if (self._good_shape_rate() >= AKAGI_DEALER_IPPATSU_GOOD_MIN) and (self._threat_level() <= AKAGI_DEALER_IPPATSU_THREAT_MAX):
+                            pass  # 緩和：そのまま押す
+                        else:
+                            # 条件満たさなければ通常通り一発回避
+                            if AKAGI_IPPATSU_AVOID_ENABLE:
+                                gen = self._genbutsu_vs_any_riichi()
+                                if gen:
+                                    cand = gen[0]
+                                    if cand != dahai:
+                                        logger.debug(f"[IPPATSU] replace discard {dahai} -> {cand} (break ippatsu vs riichi)")
+                                        dahai = cand
+                    else:
+                        if AKAGI_IPPATSU_AVOID_ENABLE:
+                            gen = self._genbutsu_vs_any_riichi()
+                            if gen:
+                                cand = gen[0]
+                                if cand != dahai:
+                                    logger.debug(f"[IPPATSU] replace discard {dahai} -> {cand} (break ippatsu vs riichi)")
+                                    dahai = cand
+        except Exception as _e:
+            logger.debug(f"[IPPATSU] avoid failed: {_e}")
+
+        # ---- 2) トップ目のときは安牌候補を最低1枚ストック（事前防御）（ADD） ----
+        try:
+            if AKAGI_TOP_RESERVE_SAFE_ENABLE and rank == 1 and not self._riichi_seat_ids():
+                # オーラスで大物手が必要 → トップ安全ストックを“解除”可能
+                if oras_need_big and AKAGI_ORAS_DISABLE_TOPSAFE_WHEN_NEED_BIG:
+                    pass  # 解除
+                else:
+                    multi_safe = self._multi_cover_safe_candidates()  # 複数相手に現物になりやすい順
+                    hand_now = [self._normalize_pai(p) for p in getattr(self.bot, "tehai_mjai", [])]
+                    simulated = [x for x in hand_now if x != self._normalize_pai(dahai)]
+                    keep_need = AKAGI_TOP_RESERVE_SAFE_MIN
+                    # 親番ならストック数を緩和（例：1 → ceil(1*0.5)=1、2 → ceil(2*0.5)=1）
+                    if dealer:
+                        keep_need = max(0, int(math.ceil(keep_need * AKAGI_DEALER_RELAX_TOPSAFE_FACTOR)))
+                    # 0 なら実質解除
+                    if keep_need > 0:
+                        left_safes = [t for t in simulated if t in set(multi_safe[:max(3, keep_need*2)])]
+                        if len(left_safes) < keep_need and multi_safe:
+                            reserve = multi_safe[0]
+                            if reserve in hand_now and reserve == self._normalize_pai(dahai):
+                                alt = None
+                                for t in hand_now:
+                                    if t != reserve and t in ("1m","9m","1p","9p","1s","9s","E","S","W","N","P","F","C"):
+                                        alt = t; break
+                                if alt is None:
+                                    for t in hand_now:
+                                        if t != reserve:
+                                            alt = t; break
+                                if alt and alt != dahai:
+                                    logger.debug(f"[TOP-SAFE] keep {keep_need} safe: replace discard {dahai} -> {alt} (reserve={reserve}, dealer={dealer})")
+                                    dahai = alt
+        except Exception as _e:
+            logger.debug(f"[TOP-SAFE] reserve failed: {_e}")
+
         tehai = sorted(tehai, key=cmp_to_key(compare_pai))
         return_points: list[Point] = []
 
@@ -1847,3 +2061,4 @@ def compare_pai(pai1: str, pai2: str):
         return 0
     else:
         return -1
+

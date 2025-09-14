@@ -29,14 +29,14 @@ def _geti(name: str, default: int) -> int:
 
 # --- Waits ---
 NAKI_PREWAIT = _getf("AKAGI_NAKI_PREWAIT", 1.50)
-AKAGI_REACH_WAIT = _getf("AKAGI_REACH_WAIT", 3.00)
+AKAGI_REACH_WAIT = _getf("AKAGI_REACH_WAIT", 2.00)
 AKAGI_RON_WAIT = _getf("AKAGI_RON_WAIT", 2.00)
 AKAGI_TSUMO_WAIT = _getf("AKAGI_TSUMO_WAIT", 1.00)
 NAKI_BUTTON_WAIT = _getf("AKAGI_NAKI_BUTTON_WAIT", 0.50)
-NAKI_CAND_WAIT = _getf("AKAGI_NAKI_CAND_WAIT", 0.25)
+NAKI_CAND_WAIT = _getf("AKAGI_NAKI_CAND_WAIT", 0.05)
 NAKI_DOUBLE_CLICK = _geti("AKAGI_NAKI_DOUBLE_CLICK", 0)
 NAKI_SINGLE_WAIT = _getf("AKAGI_NAKI_SINGLE_WAIT", NAKI_CAND_WAIT)
-NAKI_NONE_PREWAIT = _getf("AKAGI_NAKI_NONE_PREWAIT", 0.15)
+NAKI_NONE_PREWAIT = _getf("AKAGI_NAKI_NONE_PREWAIT", 0.05)
 AKAGI_OYA_FIRST_DAHAI_EXTRA = _getf("AKAGI_OYA_FIRST_DAHAI_EXTRA", 2.00)
 
 # --- Tenpai bias ---
@@ -150,8 +150,8 @@ AKAGI_OYA_TENPAI_FORCE_THREAT = _getf("AKAGI_OYA_TENPAI_FORCE_THREAT", 0.55)
 AKAGI_OYA_TENPAI_FORCE_GAIN   = _getf("AKAGI_OYA_TENPAI_FORCE_GAIN", 0.0)  # 受け入れ増などの閾値補助（0で無効）
 
 # --- Naki EV placement-aware knobs (NEW) ---
-AKAGI_NAKI_NEG_EV_TOL_BASE  = _getf("AKAGI_NAKI_NEG_EV_TOL_BASE", 250.0)   # 負EV許容の基礎
-AKAGI_NAKI_NEG_EV_TOL_PLACE = _getf("AKAGI_NAKI_NEG_EV_TOL_PLACE", 1000.0)   # 着順圧で増える許容
+AKAGI_NAKI_NEG_EV_TOL_BASE  = _getf("AKAGI_NAKI_NEG_EV_TOL_BASE", 180.0)   # 負EV許容の基礎
+AKAGI_NAKI_NEG_EV_TOL_PLACE = _getf("AKAGI_NAKI_NEG_EV_TOL_PLACE", 800.0)   # 着順圧で増える許容
 AKAGI_NAKI_TENPAI_BONUS     = _getf("AKAGI_NAKI_TENPAI_BONUS", 900.0)       # 鳴いてテンパイ到達ボーナス
 AKAGI_RYUUKYOKU_TENPAI_VALUE= _getf("AKAGI_RYUUKYOKU_TENPAI_VALUE", 1500.0) # 終盤ノーテン罰符回避の価値
 
@@ -159,15 +159,15 @@ AKAGI_RYUUKYOKU_TENPAI_VALUE= _getf("AKAGI_RYUUKYOKU_TENPAI_VALUE", 1500.0) # �
 AKAGI_NAKI_SAFETY_RELAX_VS_RIICHI_IN_ANTI_LAST = _geti("AKAGI_NAKI_SAFETY_RELAX_VS_RIICHI_IN_ANTI_LAST", 1)
 
 AKAGI_LAST_PUSH_ENABLE           = _geti("AKAGI_LAST_PUSH_ENABLE", 1)
-AKAGI_LAST_PUSH_THREAT_MAX       = _getf("AKAGI_LAST_PUSH_THREAT_MAX", 0.80)   # この脅威度までは押す
+AKAGI_LAST_PUSH_THREAT_MAX       = _getf("AKAGI_LAST_PUSH_THREAT_MAX", 0.65)   # この脅威度までは押す
 AKAGI_LAST_RIICHI_MIN_POINT      = _getf("AKAGI_LAST_RIICHI_MIN_POINT", 1500)  # ダマ期待打点がこの程度でも押す
 AKAGI_LAST_RIICHI_MIN_GOOD       = _getf("AKAGI_LAST_RIICHI_MIN_GOOD", 0.35)   # 好形率しきい値（0..1）
 
 
-AKAGI_RIICHI_MIN_ANPAI      = _geti("AKAGI_RIICHI_MIN_ANPAI", 2)     # リーチ前に欲しい安牌枚数
-AKAGI_RIICHI_THREAT_MAX     = _getf("AKAGI_RIICHI_THREAT_MAX", 0.70) # これ超えたら基本ダマ/降り寄り
-AKAGI_RIICHI_GOOD_MIN       = _getf("AKAGI_RIICHI_GOOD_MIN", 0.40)   # 好形レートがこれ未満はダマ寄り
-AKAGI_NAKI_NEG_EV_TOL_FLOOR = _getf("AKAGI_NAKI_NEG_EV_TOL_FLOOR", 120.0) # 負EV許容の下限
+AKAGI_RIICHI_MIN_ANPAI      = _geti("AKAGI_RIICHI_MIN_ANPAI", 1)     # リーチ前に欲しい安牌枚数
+AKAGI_RIICHI_THREAT_MAX     = _getf("AKAGI_RIICHI_THREAT_MAX", 0.68) # これ超えたら基本ダマ/降り寄り
+AKAGI_RIICHI_GOOD_MIN       = _getf("AKAGI_RIICHI_GOOD_MIN", 0.45)   # 好形レートがこれ未満はダマ寄り
+AKAGI_NAKI_NEG_EV_TOL_FLOOR = _getf("AKAGI_NAKI_NEG_EV_TOL_FLOOR", 90.0) # 負EV許容の下限
 AKAGI_HOUJUU_TARGET_RATE    = _getf("AKAGI_HOUJUU_TARGET_RATE", 0.13)    # 目標放銃率
 AKAGI_STATS_ALPHA           = _getf("AKAGI_STATS_ALPHA", 0.12)           # EMAの係数
 
@@ -211,6 +211,16 @@ AKAGI_WEST_IN_MIN_RON_CHILD          = _geti("AKAGI_WEST_IN_MIN_RON_CHILD", 1000
 AKAGI_WEST_IN_MIN_RON_DEALER         = _geti("AKAGI_WEST_IN_MIN_RON_DEALER", 1500)
 AKAGI_WEST_IN_MIN_TSUMO_CHILD_TOTAL  = _geti("AKAGI_WEST_IN_MIN_TSUMO_CHILD_TOTAL", 1000)
 AKAGI_WEST_IN_MIN_TSUMO_DEALER_TOTAL = _geti("AKAGI_WEST_IN_MIN_TSUMO_DEALER_TOTAL", 1500)
+
+# --- Rank ladder / deal-in / tsumo-risk knobs ---
+AKAGI_RANK_LADDER_BONUS_MAX   = _getf("AKAGI_RANK_LADDER_BONUS_MAX", 1000.0)   # 逆転に届く線への最大ボーナス
+AKAGI_DEALIN_BASE             = _getf("AKAGI_DEALIN_BASE", 0.035)             # 平常時の放銃（出す）率の基準
+AKAGI_DEALIN_RIICHI_BONUS     = _getf("AKAGI_DEALIN_RIICHI_BONUS", 0.050)     # リーチ者の放銃率上振れ
+AKAGI_DEALIN_FURO_BONUS       = _getf("AKAGI_DEALIN_FURO_BONUS", 0.010)       # 副露者の放銃率上振れ（攻め気配）
+AKAGI_DEALIN_PASSIVE_PENALTY  = _getf("AKAGI_DEALIN_PASSIVE_PENALTY", -0.010) # 完全門前/手出し少の受け身減衰
+AKAGI_TSUMO_RISK_SCALE        = _getf("AKAGI_TSUMO_RISK_SCALE", 0.60)          # 被ツモリスクの全体スケール
+AKAGI_TSUMO_RISK_RANKDROP_BONUS = _getf("AKAGI_TSUMO_RISK_RANKDROP_BONUS", 1.50) # 順位が落ちる被ツモに重み
+AKAGI_DAMA_FEED_SENSITIVITY   = _getf("AKAGI_DAMA_FEED_SENSITIVITY", 0.40)    # ダマ出アガリ率の放銃環境感度
 
 # Coordinates here is on the resolution of 16x9
 LOCATION = {
@@ -333,6 +343,97 @@ class AutoPlayMajsoul(object):
         self._ema_riichi = 0.0
         self._ema_houjuu = 0.0
         self._stats_initialized = False
+
+    # “誰が上”で“誰が下”か（席ID含む）を返す
+    def _rank_boundaries(self):
+        try:
+            scores = self._scores()
+            me = self._my_seat()
+            if not scores or me is None: return None
+            my = scores[me]
+            sorted_scores = sorted(((s,i) for i,s in enumerate(scores)), reverse=True)
+            rank = 1 + [k for k,(s,idx) in enumerate(sorted_scores) if idx==me][0]
+            above = sorted_scores[rank-2][1] if rank>=2 else None
+            below = sorted_scores[rank][1]   if rank<=3 else None
+            return {'rank': rank, 'above_seat': above, 'below_seat': below}
+        except Exception:
+            return None
+
+    # 相手ごとの“出す（放銃する）確率”の簡易推定
+    def _deal_in_prob_by_seat(self, seat_id: int) -> float:
+        try:
+            if seat_id == self._my_seat(): return 0.0
+            base = AKAGI_DEALIN_BASE
+            riichis = set(self._riichi_seat_ids())
+            if seat_id in riichis:
+                base += AKAGI_DEALIN_RIICHI_BONUS
+            furos = len((self._furos().get(seat_id, []) or []))
+            base += AKAGI_DEALIN_FURO_BONUS * min(3, furos)
+            # 受け身（副露0・河が太い）のときはやや下げ
+            rivers = (self._rivers().get(seat_id, []) or [])
+            if furos == 0 and len(rivers) >= 9:
+                base += AKAGI_DEALIN_PASSIVE_PENALTY
+            # 巡目で増減：中盤〜終盤は上がりやすくも刺さりやすい
+            j = self._junme() or 0
+            base += 0.002 * max(0, j-6)
+            return clamp(base, 0.005, 0.20)
+        except Exception:
+            return 0.04
+
+    def _avg_deal_in_prob(self) -> float:
+        try:
+            me = self._my_seat()
+            ps = [self._deal_in_prob_by_seat(s) for s in range(4) if s != me]
+            return sum(ps)/max(1,len(ps))
+        except Exception:
+            return 0.04
+
+    # 被ツモの期待失点（順位落ちの重み付け込み）
+    def _expected_tsumo_risk_loss(self) -> float:
+        try:
+            j = self._junme() or 0
+            threat = self._threat_level()
+            # “誰かがテンパイしていて、数巡のうちにツモる”の簡易率
+            # 例：中盤(9巡)で脅威0.5なら ~6% 程度に
+            p_tsumo = clamp(0.03 + 0.02*max(0, j-8) + 0.06*threat, 0.01, 0.18)
+            # 期待失点の概算：子のツモ配分 ~ 1300、親のツモ配分 ~ 2000 程度を目安に
+            # 相手の親番が場にいる場合の寄与をざっくり混ぜる
+            dealer_in_round = any(self._is_dealer_seat(s) for s in range(4))
+            base_loss = 1500.0 + (500.0 if dealer_in_round else 0.0)
+            # 順位が落ちるときは重み付け
+            _, _, lead_over_4th = self._rank_and_gaps()
+            boundaries = self._rank_boundaries() or {}
+            down_gap = (self._rank_targets() or {}).get('down_gap')
+            rankdrop_weight = AKAGI_TSUMO_RISK_RANKDROP_BONUS if (down_gap is not None and down_gap <= 2000) else 1.0
+            return AKAGI_TSUMO_RISK_SCALE * p_tsumo * base_loss * rankdrop_weight
+        except Exception:
+            return 0.0
+
+    def _rank_targets(self):
+        """
+        自分が次に“上がる/落ちる”ための点差を返す簡易器。
+        返り値: dict { 'up_gap': int|None, 'down_gap': int|None }
+        up_gap: 逆転して1つ上の順位に行くために最低限必要な素点差
+        down_gap: 被弾等で1つ順位が落ちるまでの余裕（負ならすでに下位）
+        ※ 本場/供託は別途考慮（_honba_count/_kyotaku_count を使って後で微調整）
+        """
+        try:
+            scores = self._scores()
+            me = self._my_seat()
+            if not scores or me is None: return {'up_gap': None, 'down_gap': None}
+            my = scores[me]
+            sorted_scores = sorted(((s,i) for i,s in enumerate(scores)), reverse=True)
+            rank = 1 + [i for i,(s,idx) in enumerate(sorted_scores) if idx==me][0]
+            up_gap = None; down_gap = None
+            if rank >= 2:
+                above = sorted_scores[rank-2][0]
+                up_gap = max(1, above - my + 1_000)  # バッファ1000点（場況や端数誤差を吸収）
+            if rank <= 3:
+                below = sorted_scores[rank][0]
+                down_gap = my - below
+            return {'up_gap': up_gap, 'down_gap': down_gap}
+        except Exception:
+            return {'up_gap': None, 'down_gap': None}
 
     # ===== 西入ヘルパ =====
     def _dealer_seat(self) -> int | None:
@@ -1312,7 +1413,7 @@ class AutoPlayMajsoul(object):
             called_tile = self._normalize_pai(mjai_msg.get("pai", ""))
             dang = self.tile_danger(called_tile)  # 0..1
             riichi_n = len(self._riichi_seat_ids())
-            danger = (900.0 * dang) * (1.0 + 0.5*riichi_n)
+            danger = (1000.0 * dang) * (1.0 + 0.5*riichi_n)
 
             # 着順圧（ラス回避）で重み付けする“テンパイ価値”と“ノーテン罰符回避価値”
             w = self._placement_weight()  # 0..1
@@ -1378,17 +1479,16 @@ class AutoPlayMajsoul(object):
             t = self._normalize_pai(tile)
             riichi_ids = self._riichi_seat_ids()
             if riichi_ids:
-                if any(self._is_genbutsu_to(rid, t) for rid in riichi_ids):
-                    base = 0.02
-                else:
-                    base = 0.18
+                base = 0.02 if any(self._is_genbutsu_to(rid, t) for rid in riichi_ids) else 0.22
             else:
-                base = 0.12
+                base = 0.10
+            # 字牌は安全寄り（現物/現物近似が多い）だが、無筋字牌は中盤以降はむしろ危険になりやすい
             if t in ("E","S","W","N","P","F","C"):
-                base += 0.06
+                base += 0.00  # （現物補正に任せる）
+            # 巡目ペナルティ強化
             j = self._junme() or 0
-            late_pen = max(0, j-10) * 0.01
-            return clamp(base + late_pen, 0.01, 0.45)
+            late_pen = max(0, j-10) * 0.02
+            return clamp(base + late_pen, 0.01, 0.70)
         except Exception:
             return 0.18
 
@@ -1430,6 +1530,18 @@ class AutoPlayMajsoul(object):
             win_rate_riichi = clamp(0.17 + 0.18*good + (0.06 if self._is_oya else 0.0) - 0.08*threat + 0.02*max(0, 10-junme), 0.06, 0.70)
             win_rate_dama   = clamp(win_rate_riichi - 0.06, 0.03, 0.55)
 
+            # ダマの“出アガリ環境”補正（場が押し気味＝出やすい）
+            try:
+                env = self._avg_deal_in_prob()  # だれかが放銃しやすい環境
+                # 平常0.04より高ければ、ダマ和了率を上乗せ（最大+0.03）
+                delta = clamp(AKAGI_DAMA_FEED_SENSITIVITY * (env - 0.04), 0.0, 0.03)
+                # ただし多家リーチ中は逆に出にくいので抑制
+                if len(self._riichi_seat_ids()) >= 1:
+                    delta *= 0.4
+                win_rate_dama = clamp(win_rate_dama + delta, 0.03, 0.60)
+            except Exception:
+                pass
+
             # 期待打点
             point_dama   = e_points * mangan_boost
             point_riichi = e_points * 1.22 * mangan_boost
@@ -1448,10 +1560,12 @@ class AutoPlayMajsoul(object):
                 safety_pen += 1200.0 * (threat - AKAGI_RIICHI_THREAT_MAX)
             if good < AKAGI_RIICHI_GOOD_MIN:
                 safety_pen += 600.0 * (AKAGI_RIICHI_GOOD_MIN - good)
-            # --- Oras override: オーラスで“大きい手が必要”なら安全ペナルティを解除/軽減 ---
+            # --- Oras override: オーラスで“大きい手が必要”なら安全ペナルティを半減 ---
             need_big_oras = self._treat_as_final() and self._need_big_hand_for_rankup()
             if need_big_oras and AKAGI_ORAS_NEED_BIG_DISABLE_SAFETY:
-                pass  # 完全解除
+                # 安牌ゼロだけは最低限のペナを残す
+                min_pen = 400.0 if self._count_anpai_against_riichi() == 0 else 0.0
+                EV_riichi -= max(min_pen, safety_pen * 0.5)
             else:
                 EV_riichi -= safety_pen
 
@@ -1480,7 +1594,45 @@ class AutoPlayMajsoul(object):
                     EV_dama += 200.0  # テンパイ料・被弾回避ぶんの微加点
             # 南4：3万到達プッシュならリーチEVに微加点
             if self._south4_30k_target_active():
-                EV_riichi += AKAGI_30K_RIICHI_BONUS
+                EV_riichi += max(AKAGI_30K_RIICHI_BONUS, 500.0)
+
+            try:
+                ladder = self._rank_targets()
+                up_gap = ladder.get('up_gap'); down_gap = ladder.get('down_gap')
+                borders = self._rank_boundaries() or {}
+                above_seat = borders.get('above_seat')
+                # 本場/供託も最終収支に効くので概算で補正
+                honba   = max(0, self._honba_count())
+                kyotaku = max(0, self._kyotaku_count())
+                honba_gain_riichi = honba * 300    # 親子混在の概算（平均）
+                honba_gain_dama   = honba * 300
+                kyotaku_gain_if_win = kyotaku * 1000
+
+                # 逆転に足る見込みが高いなら、その線を後押し
+                # （点棒差に対して期待打点×和了率がどれだけ届くかでスコアリング）
+                if up_gap:
+                    reach_push = clamp((win_rate_riichi*point_riichi + honba_gain_riichi + kyotaku_gain_if_win - up_gap) / 2000.0, -0.5, 1.0)
+                    dama_push  = clamp((win_rate_dama*point_dama   + honba_gain_dama   + kyotaku_gain_if_win - up_gap) / 2000.0, -0.5, 1.0)
+                    # 相手別：上家/対面/下家のうち“直上の相手”からロンできれば逆転する重み
+                    p_above_feeds = self._deal_in_prob_by_seat(above_seat) if above_seat is not None else self._avg_deal_in_prob()
+                    EV_riichi += clamp(AKAGI_RANK_LADDER_BONUS_MAX * reach_push * (0.5 + 0.5*p_above_feeds/0.12), -AKAGI_RANK_LADDER_BONUS_MAX, AKAGI_RANK_LADDER_BONUS_MAX)
+                    EV_dama   += clamp((AKAGI_RANK_LADDER_BONUS_MAX*0.75) * dama_push * (0.5 + 0.5*p_above_feeds/0.12), -AKAGI_RANK_LADDER_BONUS_MAX, AKAGI_RANK_LADDER_BONUS_MAX)
+
+                # トップ維持：リーチ棒が致命となる僅差はリーチを控える
+                if rank == 1 and down_gap is not None and down_gap <= 1500:
+                    EV_riichi -= 400.0  # 棒/被弾での逆転リスク
+                    # ダマは維持重視で微加点
+                    EV_dama   += 200.0
+            except Exception:
+                pass
+
+            # === 被ツモリスクをEVから引く（宣言でやや上振れ） ===
+            try:
+                risk_loss = self._expected_tsumo_risk_loss()
+                EV_riichi -= risk_loss * 1.10   # 宣言で場が押しやすい想定
+                EV_dama   -= risk_loss * 0.95
+            except Exception:
+                pass
 
             best = max(EV_riichi, EV_dama, EV_fold)
 
@@ -1734,10 +1886,10 @@ class AutoPlayMajsoul(object):
 
         # --- 打牌（自分の手番） ---
         if mjai_msg['type'] == 'dahai' and not self.bot.self_riichi_accepted:
-            wait = random.uniform(0.8, 1.0)
+            wait = random.uniform(0.8, 1.2)
 
             if not self.bot.last_kawa_tile:
-                wait = max(wait, 1.0)
+                wait = max(wait, 1.2)
                 try:
                     if self._is_oya_now() and self._is_my_first_discard_this_hand():
                         extra = max(0.0, AKAGI_OYA_FIRST_DAHAI_EXTRA)
@@ -2028,7 +2180,7 @@ class AutoPlayMajsoul(object):
         elif mjai_msg['type'] == 'ryukyoku':
             btn_wait = AKAGI_REACH_WAIT
         else:
-            btn_wait = max(0.0, NAKI_BUTTON_WAIT + random.uniform(-0.02, 0.02))
+            btn_wait = max(0.0, NAKI_BUTTON_WAIT)
 
         # 連鎖鳴きは押す直前で開始フラグ（chi/ponのみ）
         if mjai_msg['type'] in ('chi','pon'):

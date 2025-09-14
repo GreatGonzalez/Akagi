@@ -1279,14 +1279,14 @@ def run_auto_start_sequence(page: Page) -> None:
     page.wait_for_timeout(3_000)
 
     # 金の間（必要なら）
-    # _ensure_viewport(page, need_w=900+10, need_h=500+10)
-    # page.mouse.click(900, 500)
-    # page.wait_for_timeout(3_000)
+    _ensure_viewport(page, need_w=900+10, need_h=500+10)
+    page.mouse.click(900, 500)
+    page.wait_for_timeout(3_000)
 
     # 王の間（本コードではこちらを選択）
-    _ensure_viewport(page, need_w=900+10, need_h=600+10)
-    page.mouse.click(900, 600)
-    page.wait_for_timeout(3_000)
+    # _ensure_viewport(page, need_w=900+10, need_h=600+10)
+    # page.mouse.click(900, 600)
+    # page.wait_for_timeout(3_000)
 
     # 四人南
     _ensure_viewport(page, need_w=900+10, need_h=400+10)

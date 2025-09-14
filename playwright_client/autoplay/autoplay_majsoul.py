@@ -28,9 +28,9 @@ def _geti(name: str, default: int) -> int:
 
 
 # --- Waits ---
-NAKI_PREWAIT = _getf("AKAGI_NAKI_PREWAIT", 1.00)
-AKAGI_REACH_WAIT = _getf("AKAGI_REACH_WAIT", 1.00)
-AKAGI_RON_WAIT = _getf("AKAGI_RON_WAIT", 1.00)
+NAKI_PREWAIT = _getf("AKAGI_NAKI_PREWAIT", 1.50)
+AKAGI_REACH_WAIT = _getf("AKAGI_REACH_WAIT", 3.00)
+AKAGI_RON_WAIT = _getf("AKAGI_RON_WAIT", 2.00)
 AKAGI_TSUMO_WAIT = _getf("AKAGI_TSUMO_WAIT", 1.00)
 NAKI_BUTTON_WAIT = _getf("AKAGI_NAKI_BUTTON_WAIT", 0.50)
 NAKI_CAND_WAIT = _getf("AKAGI_NAKI_CAND_WAIT", 0.25)
@@ -184,6 +184,34 @@ AKAGI_ORAS_NEED_BIG_DISABLE_SAFETY  = _geti("AKAGI_ORAS_NEED_BIG_DISABLE_SAFETY"
 AKAGI_ORAS_DISABLE_TOPSAFE_WHEN_NEED_BIG = _geti("AKAGI_ORAS_DISABLE_TOPSAFE_WHEN_NEED_BIG", 1) # 同上：トップ安全ストックも解除
 AKAGI_ORAS_DISABLE_IPPATSU_WHEN_NEED_BIG = _geti("AKAGI_ORAS_DISABLE_IPPATSU_WHEN_NEED_BIG", 1) # 同上：一発回避も解除
 
+# --- Oras-Last (ラス回避最優先) 専用スイッチ ---
+AKAGI_ORAS_LAST_ENABLE = _geti("AKAGI_ORAS_LAST_ENABLE", 1)
+# 鳴きでテンパイ到達が見込めない/期待打点が低いときは鳴かない
+AKAGI_ORAS_LAST_MIN_POINT_FOR_CALL = _getf("AKAGI_ORAS_LAST_MIN_POINT_FOR_CALL", 5200.0)
+# 役牌ポンでもこの期待打点未満は抑止（安手ポンの抑制）
+AKAGI_ORAS_LAST_FORBID_YAKUHAI_PON_UNDER = _getf("AKAGI_ORAS_LAST_FORBID_YAKUHAI_PON_UNDER", 5200.0)
+# テンパイ中のカンを禁止（ノーテン転落事故の防止）
+AKAGI_ORAS_LAST_FORBID_KAN_IF_TENPAI = _geti("AKAGI_ORAS_LAST_FORBID_KAN_IF_TENPAI", 1)
+# 1シャンテンでも終盤はテンパイ維持優先でカン禁止
+AKAGI_ORAS_LAST_TENPAI_LOCK_JUNME = _geti("AKAGI_ORAS_LAST_TENPAI_LOCK_JUNME", 10)
+# 僅差ならダマ優先マージン（EV差）
+AKAGI_ORAS_LAST_RIICHI_MARGIN    = _getf("AKAGI_ORAS_LAST_RIICHI_MARGIN", 350.0)  
+ 
+# --- 西入（南4延長）＆3万到達プッシュ関連 ---
+AKAGI_WEST_IN_ENABLE = _geti("AKAGI_WEST_IN_ENABLE", 1)   # 南4で延長（西入）判定を有効化
+AKAGI_30K_TARGET_ENABLE = _geti("AKAGI_30K_TARGET_ENABLE", 1)  # 南4で自分が3万未満なら到達プッシュ
+AKAGI_30K_CALL_ALLOW = _geti("AKAGI_30K_CALL_ALLOW", 1)        # 安手でもテンパイ前進の鳴きを許容
+AKAGI_30K_RIICHI_BONUS = _getf("AKAGI_30K_RIICHI_BONUS", 300.0) # 到達プッシュ時のリーチEV加点
+AKAGI_30K_MELD_BONUS   = _getf("AKAGI_30K_MELD_BONUS", 250.0)   # 到達プッシュ時の鳴きEV加点
+AKAGI_30K_MIN_EXPECTED = _getf("AKAGI_30K_MIN_EXPECTED", 1800.0) # 鳴き後期待打点の最低ライン
+
+AKAGI_WEST_IN_HONBA_VALUE  = _geti("AKAGI_WEST_IN_HONBA_VALUE", 300)    # 本場1本の勝者加点
+AKAGI_WEST_IN_KYOTAKU_VALUE = _geti("AKAGI_WEST_IN_KYOTAKU_VALUE", 1000) # 供託1本の勝者加点
+AKAGI_WEST_IN_MIN_RON_CHILD          = _geti("AKAGI_WEST_IN_MIN_RON_CHILD", 1000)
+AKAGI_WEST_IN_MIN_RON_DEALER         = _geti("AKAGI_WEST_IN_MIN_RON_DEALER", 1500)
+AKAGI_WEST_IN_MIN_TSUMO_CHILD_TOTAL  = _geti("AKAGI_WEST_IN_MIN_TSUMO_CHILD_TOTAL", 1000)
+AKAGI_WEST_IN_MIN_TSUMO_DEALER_TOTAL = _geti("AKAGI_WEST_IN_MIN_TSUMO_DEALER_TOTAL", 1500)
+
 # Coordinates here is on the resolution of 16x9
 LOCATION = {
     "tiles": [
@@ -305,6 +333,126 @@ class AutoPlayMajsoul(object):
         self._ema_riichi = 0.0
         self._ema_houjuu = 0.0
         self._stats_initialized = False
+
+    # ===== 西入ヘルパ =====
+    def _dealer_seat(self) -> int | None:
+        try:
+            dealer = getattr(self.bot, "_AkagiBot__dealer", None)
+            return int(dealer) if dealer is not None else None
+        except Exception:
+            return None
+
+    def _is_dealer_seat(self, seat_id: int) -> bool:
+        try:
+            d = self._dealer_seat()
+            return (d is not None) and (int(seat_id) == int(d))
+        except Exception:
+            return False
+
+    def _honba_count(self) -> int:
+        for cand in ["honba", "_AkagiBot__honba", "kyoku_honba", "round_honba", "honba_sticks"]:
+            try:
+                if hasattr(self.bot, cand):
+                    v = getattr(self.bot, cand)
+                    return int(v) if v is not None else 0
+            except Exception:
+                pass
+        return 0
+
+    def _kyotaku_count(self) -> int:
+        for cand in ["kyotaku", "_AkagiBot__kyotaku", "riichi_sticks", "riichi_bets_on_table", "kyotaku_sticks"]:
+            try:
+                if hasattr(self.bot, cand):
+                    v = getattr(self.bot, cand)
+                    return int(v) if v is not None else 0
+            except Exception:
+                pass
+        return 0
+
+    def _min_win_gain_for_seat(self, seat_id: int) -> int:
+        try:
+            if self._is_dealer_seat(seat_id):
+                ron   = int(AKAGI_WEST_IN_MIN_RON_DEALER)
+                tsumo = int(AKAGI_WEST_IN_MIN_TSUMO_DEALER_TOTAL)
+            else:
+                ron   = int(AKAGI_WEST_IN_MIN_RON_CHILD)
+                tsumo = int(AKAGI_WEST_IN_MIN_TSUMO_CHILD_TOTAL)
+            return int(min(ron, tsumo))
+        except Exception:
+            return int(AKAGI_WEST_IN_MIN_RON_CHILD)
+
+    def _augmented_scores_for_endcheck(self) -> list[int]:
+        scores = self._scores() or [0,0,0,0]
+        honba   = max(0, self._honba_count())
+        kyotaku = max(0, self._kyotaku_count())
+        base_bonus = honba * AKAGI_WEST_IN_HONBA_VALUE + kyotaku * AKAGI_WEST_IN_KYOTAKU_VALUE
+        aug: list[int] = []
+        for seat_id in range(min(4, len(scores))):
+            try:
+                min_win = self._min_win_gain_for_seat(seat_id)
+                aug.append(int(scores[seat_id]) + int(base_bonus) + int(min_win))
+            except Exception:
+                aug.append(int(scores[seat_id]))
+        return aug
+
+    def _west_in_expected(self) -> bool:
+        """
+        南4の終局時に「全員が30000未満」なら西1へ（西入）。
+        本場・供託・最小和了加点を加味した“最小加算”を各者に置いてなお全員<30000なら西入見込み。
+        """
+        if not (AKAGI_WEST_IN_ENABLE
+                and self._bakaze in ("S","south","South")
+                and self._kyoku_number
+                and int(self._kyoku_number) >= 4):
+            return False
+        try:
+            aug = self._augmented_scores_for_endcheck()
+            return len(aug) >= 4 and all(int(s) < 30000 for s in aug[:4])
+        except Exception:
+            return False
+
+    def _treat_as_final(self) -> bool:
+        """西入見込みがない“本当の最終局”かどうか"""
+        return self._is_all_last_like() and not self._west_in_expected()
+
+    def _south4_30k_target_active(self) -> bool:
+        """
+        南4で自分の“到達可能スコア（最小和了+本場+供託）”が30000未満なら到達プッシュON
+        """
+        if not (AKAGI_30K_TARGET_ENABLE
+                and self._bakaze in ("S","south","South")
+                and self._kyoku_number
+                and int(self._kyoku_number) >= 4):
+            return False
+        try:
+            scores = self._scores() or []
+            me = self._my_seat()
+            if me is None or len(scores) < 4:
+                return False
+            honba   = max(0, self._honba_count())
+            kyotaku = max(0, self._kyotaku_count())
+            base_bonus = honba * AKAGI_WEST_IN_HONBA_VALUE + kyotaku * AKAGI_WEST_IN_KYOTAKU_VALUE
+            min_win    = self._min_win_gain_for_seat(me)
+            my_aug = int(scores[me]) + int(base_bonus) + int(min_win)
+            return my_aug < 30000
+        except Exception:
+            return False
+
+    def _is_oras_last_and_lastplace(self) -> bool:
+        """オーラス相当 かつ 自分がラス目か（ラス回避最優先モード判定）"""
+        if not AKAGI_ORAS_LAST_ENABLE:
+            return False
+        if not self._is_all_last_like():
+            return False
+        try:
+            rank, _, _ = self._rank_and_gaps()
+            return rank == 4
+        except Exception:
+            return False
+
+    def _is_tenpai(self) -> bool:
+        sh = self._get_shanten_safe()
+        return (sh is not None) and (sh == 0)
 
     # 相手毎に「その相手の現物」になり得る牌セット
     def _opponent_genbutsu_sets(self) -> dict[int, set[str]]:
@@ -913,6 +1061,12 @@ class AutoPlayMajsoul(object):
                     return True
                 return False
 
+        # 南4の3万到達プッシュ：鳴いてテンパイ到達可なら緩和
+        if self._south4_30k_target_active() and naki_type in ("chi","pon"):
+            sh = self._get_shanten_safe()
+            if sh is not None and sh <= 2:
+                return True
+
         # 通常（親はやや緩い）
         if not self._is_oya:
             return shanten == 1
@@ -960,10 +1114,13 @@ class AutoPlayMajsoul(object):
             if junme is not None and junme >= AKAGI_NAKI_SAFETY_JUNME_TIGHT:
                 anpai_cnt = self._count_anpai_against_riichi()
                 dang = self.tile_danger(pai)
+                danger_gate = 0.30
+                if self._is_oras_last_and_lastplace():
+                    danger_gate = 0.22  # ラス目は危険鳴きをより抑止
                 if anpai_cnt < min_anpai and ntype in ("chi", "pon"):
                     logger.debug(f"[NAKI-SAFETY] decline: late junme={junme}, anpai={anpai_cnt} < {min_anpai}")
                     return False
-                if dang >= 0.30 and ntype in ("chi","pon"):
+                if dang >= danger_gate and ntype in ("chi","pon"):
                     logger.debug(f"[NAKI-SAFETY] decline: danger high={dang:.2f} pai={pai}")
                     return False
 
@@ -1015,7 +1172,7 @@ class AutoPlayMajsoul(object):
         try:
             rank, gap_to_third, lead_over_4th = self._rank_and_gaps()
             junme = self._junme() or 0
-            is_oras = 1.0 if self._is_all_last_like() else 0.0
+            is_oras = 1.0 if self._treat_as_final() else 0.0
             base = 0.0
             if rank == 4:
                 base = 0.6 + 0.3*sigmoid((6000 - (gap_to_third or 0))/2000.0)
@@ -1045,10 +1202,12 @@ class AutoPlayMajsoul(object):
                 rank, gap_to_third, _ = self._rank_and_gaps()
             except Exception:
                 rank = None
-            last_push = (rank == 4) or self._anti_last_active() or self._is_all_last_like()
+            last_push = (rank == 4) or self._anti_last_active() or self._treat_as_final()
             if last_push:
                 bonus += 0.12
-            return clamp(base + bonus, -0.4, 0.85)
+            # 放銃EMAに応じてリスク予算をさらに縮める（不調時の暴れ抑止）
+            shrink = self._neg_ev_dynamic_shrink()  # 0..1
+            return clamp((base + bonus) * (0.85 + 0.15*shrink), -0.4, 0.85)
         except Exception:
             return 0.0
 
@@ -1164,7 +1323,16 @@ class AutoPlayMajsoul(object):
             # 終盤の形式テンパイ価値（ノーテン罰符回避）
             j = self._junme() or 0
             late = clamp((j - 10)/4.0, 0.0, 1.0)  # 10巡目以降で立ち上がる
-            ryuukyoku_value = late * AKAGI_RYUUKYOKU_TENPAI_VALUE * (0.5 + 0.5*w)
+            boost = 1.0
+            if self._is_oras_last_and_lastplace():
+                boost = 1.5  # ラス回避局面では形式テンパイ価値を上げる
+            ryuukyoku_value = late * AKAGI_RYUUKYOKU_TENPAI_VALUE * (0.5 + 0.5*w) * boost
+            # 南4・3万到達プッシュ：鳴きに加点（小ぶり）
+            if self._south4_30k_target_active() and mjai_msg.get("type") in ("chi","pon"):
+                delta_bonus = AKAGI_30K_MELD_BONUS
+                if self._estimate_hand_value() < AKAGI_30K_MIN_EXPECTED:
+                    delta_bonus *= 1.2
+                return float((win_up*point - down - danger + tenpai_bonus + ryuukyoku_value) + delta_bonus)
 
             delta = win_up*point - down - danger + tenpai_bonus + ryuukyoku_value
 
@@ -1186,7 +1354,8 @@ class AutoPlayMajsoul(object):
             ura = 350.0 if ktype in ("ankan","kakan") else 200.0
             threat = self._threat_level()
             penalty = 500.0 * threat
-            return ura - penalty
+            # 放銃EMAが高いほどカンEVをデフレ
+            return (ura - penalty) * self._neg_ev_dynamic_shrink()
         except Exception:
             return -100.0
 
@@ -1246,7 +1415,7 @@ class AutoPlayMajsoul(object):
                 rank = None
             if (
                 AKAGI_LAST_PUSH_ENABLE
-                and (self._anti_last_active() or self._is_all_last_like() or rank == 4)
+                and (self._anti_last_active() or self._treat_as_final() or rank == 4)
                 and threat <= AKAGI_LAST_PUSH_THREAT_MAX
                 and (good >= AKAGI_LAST_RIICHI_MIN_GOOD or e_points >= AKAGI_LAST_RIICHI_MIN_POINT)
             ):
@@ -1280,7 +1449,7 @@ class AutoPlayMajsoul(object):
             if good < AKAGI_RIICHI_GOOD_MIN:
                 safety_pen += 600.0 * (AKAGI_RIICHI_GOOD_MIN - good)
             # --- Oras override: オーラスで“大きい手が必要”なら安全ペナルティを解除/軽減 ---
-            need_big_oras = self._is_all_last_like() and self._need_big_hand_for_rankup()
+            need_big_oras = self._treat_as_final() and self._need_big_hand_for_rankup()
             if need_big_oras and AKAGI_ORAS_NEED_BIG_DISABLE_SAFETY:
                 pass  # 完全解除
             else:
@@ -1305,6 +1474,13 @@ class AutoPlayMajsoul(object):
             # --- Oras override: gate も下げて「勝ちに行く」リーチを通しやすく ---
             if need_big_oras and AKAGI_ORAS_NEED_BIG_DISABLE_SAFETY:
                 gate = min(gate, -0.20)  # 僅差でもリーチを選びやすく
+            # オーラスラス目：リーチとダマが僅差ならダマ寄りに倒す
+            if self._is_oras_last_and_lastplace():
+                if (EV_riichi - EV_dama) <= AKAGI_ORAS_LAST_RIICHI_MARGIN:
+                    EV_dama += 200.0  # テンパイ料・被弾回避ぶんの微加点
+            # 南4：3万到達プッシュならリーチEVに微加点
+            if self._south4_30k_target_active():
+                EV_riichi += AKAGI_30K_RIICHI_BONUS
 
             best = max(EV_riichi, EV_dama, EV_fold)
 
@@ -1360,6 +1536,8 @@ class AutoPlayMajsoul(object):
 
             if junme is not None and junme >= AKAGI_NAKI_SAFETY_JUNME_TIGHT:
                 base_min = AKAGI_NAKI_SAFETY_MIN_ANPAI
+                if self._is_oras_last_and_lastplace():
+                    base_min += 1
                 if AKAGI_SOMETE_SAFETY_RELAX:
                     base_min = max(0, base_min - 1)
                 if AKAGI_SOMETE_PROGRESS_RELAX_ANPAI:
@@ -1396,7 +1574,10 @@ class AutoPlayMajsoul(object):
     def _naki_chain_window_open(self) -> bool:
         if not (AKAGI_NAKI_CHAIN_ENABLE and self._naki_chain_active):
             return False
-        if self._naki_chain_count >= (1 + AKAGI_NAKI_CHAIN_MAX):
+        max_chain = AKAGI_NAKI_CHAIN_MAX
+        if self._is_oras_last_and_lastplace():
+            max_chain = max(1, AKAGI_NAKI_CHAIN_MAX - 1)
+        if self._naki_chain_count >= (1 + max_chain):
             return False
         threat = self._threat_level()
         if threat > AKAGI_NAKI_CHAIN_THREAT_MAX and not (self._anti_last_active() or self._oya_endgame_push_active()):
@@ -1404,7 +1585,10 @@ class AutoPlayMajsoul(object):
         try:
             j0 = self._naki_chain_anchor_junme or 0
             jn = self._junme() or j0
-            return (jn - j0) <= AKAGI_NAKI_CHAIN_WINDOW_JUNME
+            window = AKAGI_NAKI_CHAIN_WINDOW_JUNME
+            if self._is_oras_last_and_lastplace():
+                window = max(1, window - 1)  # ラス目はウィンドウを1巡短縮
+            return (jn - j0) <= window
         except Exception:
             return True
 
@@ -1425,6 +1609,8 @@ class AutoPlayMajsoul(object):
 
             if junme is not None and junme >= AKAGI_NAKI_SAFETY_JUNME_TIGHT:
                 base_min = AKAGI_NAKI_SAFETY_MIN_ANPAI
+                if self._is_oras_last_and_lastplace():
+                    base_min += 1  # ラス目は安牌在庫+1
                 if self._is染め手_like() and AKAGI_SOMETE_SAFETY_RELAX:
                     base_min = max(0, base_min - 1)
                 if AKAGI_NAKI_CHAIN_RELAX_ANPAI:
@@ -1455,6 +1641,17 @@ class AutoPlayMajsoul(object):
             if ktype == 'ankan' and not AKAGI_ANKAN_ENABLE: return False
             if ktype == 'kakan' and not AKAGI_KAKAN_ENABLE: return False
             if ktype == 'daiminkan' and not AKAGI_DAIMINKAN_ENABLE: return False
+
+            # === Oras-Last 厳格化：テンパイ維持 > カン ===
+            if self._is_oras_last_and_lastplace():
+                sh = self._get_shanten_safe()
+                j  = self._junme() or 0
+                # テンパイ中はカン全面禁止（ノーテン落ち事故の防止）
+                if AKAGI_ORAS_LAST_FORBID_KAN_IF_TENPAI and (sh == 0):
+                    return False
+                # 1シャンテンでも終盤はカン禁止（形式テンパイ狙いを優先）
+                if (sh == 1) and (j >= AKAGI_ORAS_LAST_TENPAI_LOCK_JUNME):
+                    return False
 
             threat = self._threat_level()
             junme  = self._junme() or 0
@@ -1620,6 +1817,7 @@ class AutoPlayMajsoul(object):
         try:
             oya_endgame = self._oya_endgame_push_active()
             anti_last = self._anti_last_active()
+            south4_30k = self._south4_30k_target_active()
 
             # KANは状況可（ここでまずポリシーでふるい）
             if mjai_msg.get('type') in ('ankan','kakan','daiminkan'):
@@ -1653,6 +1851,34 @@ class AutoPlayMajsoul(object):
 
             # 鳴きは安全度→“できれば聴牌”の順で判定（＋EV比較）
             if mjai_msg.get('type') in naki_types:
+                # === Oras-Last（オーラスラス目）専用の鳴き抑止 ===
+                if self._is_oras_last_and_lastplace():
+                    called_tile = self._normalize_pai(mjai_msg.get('pai', ''))
+                    # 鳴いてテンパイに届かない進行は原則拒否
+                    if not self._would_tenpai_by_call(mjai_msg.get('type')):
+                        logger.debug(f"[ORAS-LAST] decline {mjai_msg['type']}: would not reach tenpai")
+                        mjai_msg = dict(mjai_msg); mjai_msg['type'] = 'none'
+                    else:
+                        exp_pt = self._estimate_hand_value()
+                        # 役牌ポンでも安手は拒否（安い發ポン等の抑制）
+                        if (mjai_msg.get('type') == 'pon') and self._is_yakuhai_tile(called_tile):
+                            if exp_pt < AKAGI_ORAS_LAST_FORBID_YAKUHAI_PON_UNDER:
+                                logger.debug(f"[ORAS-LAST] decline PON(yakuhai={called_tile}): exp_pt={exp_pt:.0f} < {AKAGI_ORAS_LAST_FORBID_YAKUHAI_PON_UNDER:.0f}")
+                                mjai_msg = dict(mjai_msg); mjai_msg['type'] = 'none'
+                        # そもそも期待打点が低すぎる鳴きは拒否
+                        if mjai_msg.get('type') != 'none' and exp_pt < AKAGI_ORAS_LAST_MIN_POINT_FOR_CALL:
+                            logger.debug(f"[ORAS-LAST] decline {mjai_msg['type']}: exp_pt={exp_pt:.0f} < {AKAGI_ORAS_LAST_MIN_POINT_FOR_CALL:.0f}")
+                            mjai_msg = dict(mjai_msg); mjai_msg['type'] = 'none'
+
+                # === 南4・自分<30000：到達プッシュで安手でも前進を許容 ===
+                if south4_30k and mjai_msg.get('type') != 'none' and AKAGI_30K_CALL_ALLOW:
+                    exp_pt = self._estimate_hand_value()
+                    if exp_pt < AKAGI_30K_MIN_EXPECTED:
+                        if self._would_tenpai_by_call(mjai_msg.get('type')):
+                            logger.debug(f"[30K-PUSH] accept {mjai_msg['type']} (exp_pt={exp_pt:.0f} < min={AKAGI_30K_MIN_EXPECTED:.0f})")
+                        else:
+                            pass
+
                 if not force_accept_naki:
                     # 守備チェック
                     if not self._naki_safety_ok(mjai_msg):

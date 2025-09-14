@@ -1,0 +1,161 @@
+diff --git a/playwright_client/autoplay/autoplay_majsoul.py b/playwright_client/autoplay/autoplay_majsoul.py
+index 10fb158..a404869 100644
+--- a/playwright_client/autoplay/autoplay_majsoul.py
++++ b/playwright_client/autoplay/autoplay_majsoul.py
+@@ -29,7 +29,7 @@ def _geti(name: str, default: int) -> int:
+ 
+ # --- Waits ---
+ NAKI_PREWAIT = _getf("AKAGI_NAKI_PREWAIT", 1.00)
+-AKAGI_REACH_WAIT = _getf("AKAGI_REACH_WAIT", 1.00)
++AKAGI_REACH_WAIT = _getf("AKAGI_REACH_WAIT", 1.50)
+ AKAGI_RON_WAIT = _getf("AKAGI_RON_WAIT", 1.00)
+ AKAGI_TSUMO_WAIT = _getf("AKAGI_TSUMO_WAIT", 1.00)
+ NAKI_BUTTON_WAIT = _getf("AKAGI_NAKI_BUTTON_WAIT", 0.50)
+@@ -184,6 +184,15 @@ AKAGI_ORAS_NEED_BIG_DISABLE_SAFETY  = _geti("AKAGI_ORAS_NEED_BIG_DISABLE_SAFETY"
+ AKAGI_ORAS_DISABLE_TOPSAFE_WHEN_NEED_BIG = _geti("AKAGI_ORAS_DISABLE_TOPSAFE_WHEN_NEED_BIG", 1) # 同上：トップ安全ストックも解除
+ AKAGI_ORAS_DISABLE_IPPATSU_WHEN_NEED_BIG = _geti("AKAGI_ORAS_DISABLE_IPPATSU_WHEN_NEED_BIG", 1) # 同上：一発回避も解除
+ 
++# --- Naki global toggle control (ADD) ---
++AKAGI_NAKI_TOGGLE_ENABLE       = _geti("AKAGI_NAKI_TOGGLE_ENABLE", 1)
++AKAGI_NAKI_TOGGLE_COOLDOWN_S   = _getf("AKAGI_NAKI_TOGGLE_COOLDOWN_S", 0.5)   # 連打防止
++AKAGI_NAKI_TOGGLE_JUNME_MIN    = _geti("AKAGI_NAKI_TOGGLE_JUNME_MIN", 0)      # 何巡目以降でトグル反映するか
++# 画面座標（16x9基準）。ボタンのオレンジ三角（▶）付近など、確実に反応する位置を指定。
++AKAGI_UI_BTN_NAKI_X            = _getf("AKAGI_UI_BTN_NAKI_X",  0.55)          # 例: 右側サイドにある場合のx
++AKAGI_UI_BTN_NAKI_Y            = _getf("AKAGI_UI_BTN_NAKI_Y",  5.40)          # 例: サイド中段のy
++
++
+ # Coordinates here is on the resolution of 16x9
+ LOCATION = {
+     "tiles": [
+@@ -306,6 +315,79 @@ class AutoPlayMajsoul(object):
+         self._ema_houjuu = 0.0
+         self._stats_initialized = False
+ 
++        self._naki_toggle_on: bool | None = None  # None=未知、True=ON、False=OFF
++        self._naki_toggle_last_ts: float = 0.0
++
++    # いま「鳴き判定を有効にしたいか？」を返す（True=判定したい=UIはOFFにすべき）
++    def _want_naki_decision_enabled(self) -> bool:
++        """
++        基本方針（≒ 鳴き判定=ONにしたい状況）：
++          - 速度がほしい：染め手傾向 / シャンテン<=2 / 連鎖鳴きウィンドウ / ラス回避 or 親終盤プッシュ
++          - ただし安全側：トップ目で脅威が高い/門前の方が良い などは判定OFFに寄せる
++        ※ ここは“グローバルの判定ON/OFF”の指針。個別の鳴き可否は従来EV/安全で最終判断。
++        """
++        try:
++            sh = self._get_shanten_safe() or 9
++            threat = self._threat_level()
++            rank, gap_to_third, lead_over_4th = self._rank_and_gaps()
++            dealer = bool(self._is_oya)
++            junme = self._junme() or 0
++
++            need_speed = (
++                self._is染め手_like() or
++                sh <= 2 or
++                self._naki_chain_window_open() or
++                self._anti_last_active() or
++                self._oya_endgame_push_active()
++            )
++            keep_closed = (
++                (rank == 1 and threat >= 0.5) or
++                (self._is_all_last_like() and (rank == 1 or rank == 2) and (lead_over_4th or 99999) >= 2000) or
++                (threat >= 0.7 and not dealer and sh <= 1)
++            )
++            if keep_closed:
++                return False
++            if need_speed:
++                return True
++        except Exception:
++            pass
++        return False
++
++    # 現在の内部状態と望まれる状態が異なるときにUIボタンをクリックして合わせる
++    def _maybe_toggle_naki(self):
++        if not AKAGI_NAKI_TOGGLE_ENABLE:
++            return []
++        try:
++            junme = self._junme() or 0
++            if junme < AKAGI_NAKI_TOGGLE_JUNME_MIN:
++                return []
++            decision_enabled = self._want_naki_decision_enabled()
++            desired_toggle_on = (not decision_enabled)  # ←ここが反転の肝：UI ONは“判定しない”
++            if self._naki_toggle_on is None:
++                # 初期化：とりあえず望まれる状態を内部に採用（UI実際状態は不明）
++                self._naki_toggle_on = desired_toggle_on
++                return []
++            if desired_toggle_on == self._naki_toggle_on:
++                return []
++            # クールダウン
++            now = time.time()
++            if now - self._naki_toggle_last_ts < AKAGI_NAKI_TOGGLE_COOLDOWN_S:
++                return []
++            self._naki_toggle_last_ts = now
++
++            # クリック座標を生成
++            x = AKAGI_UI_BTN_NAKI_X
++            y = AKAGI_UI_BTN_NAKI_Y
++            # 既存の座標系に合わせて必要なら変換。ここではそのまま使用。
++            self._naki_toggle_on = desired_toggle_on
++            wait = 0.05
++            logger.debug(f"[NAKI-TOGGLE] click to set -> {'ON(disable-judge)' if desired_toggle_on else 'OFF(enable-judge)'}")
++            return [Point(x, y, wait)]
++        except Exception as _e:
++            logger.debug(f"[NAKI-TOGGLE] error: {_e}")
++            return []
++
++
+     # 相手毎に「その相手の現物」になり得る牌セット
+     def _opponent_genbutsu_sets(self) -> dict[int, set[str]]:
+         res = {}
+@@ -1515,6 +1597,10 @@ class AutoPlayMajsoul(object):
+         logger.debug(f"Act: {mjai_msg}")
+         logger.debug(f"reach_accepted: {self.bot.self_riichi_accepted}")
+         self._telemetry_feed(mjai_msg)
++        # 鳴きトグルの必要があれば先にクリック
++        # toggle_pts = self._maybe_toggle_naki()
++        # if toggle_pts:
++        #     return toggle_pts
+ 
+         # ---- 局開始イベントでフラグをリセット＆親判定 ----
+         if mjai_msg.get("type") == "start_kyoku":
+@@ -1528,6 +1614,9 @@ class AutoPlayMajsoul(object):
+             self._fold_mode = False
+             self._fold_locked_by_riichi = False
+             self._capture_round_info_from_start(mjai_msg)
++            # --- NAKIトグル：ゲームUIは局開始時に必ずOFF -> 内部状態もOFFに同期 ---
++            self._naki_toggle_on = False
++            self._naki_toggle_last_ts = 0.0  # 開幕はすぐ押せるようクールダウン解除
+ 
+         # --- フォールドモード更新 ---
+         try:
+@@ -1537,10 +1626,10 @@ class AutoPlayMajsoul(object):
+ 
+         # --- 打牌（自分の手番） ---
+         if mjai_msg['type'] == 'dahai' and not self.bot.self_riichi_accepted:
+-            wait = random.uniform(0.8, 1.0)
++            wait = random.uniform(1.0, 1.2)
+ 
+             if not self.bot.last_kawa_tile:
+-                wait = max(wait, 1.0)
++                wait = max(wait, 1.2)
+                 try:
+                     if self._is_oya_now() and self._is_my_first_discard_this_hand():
+                         extra = max(0.0, AKAGI_OYA_FIRST_DAHAI_EXTRA)
+@@ -1557,6 +1646,17 @@ class AutoPlayMajsoul(object):
+             return_points = [Point(-1, -1, wait)]
+             return_points += self.click_dahai(mjai_msg)
+ 
++            try:
++                post = max(0.0, 0.05)
++                toggle_pts = self._maybe_toggle_naki()
++                if toggle_pts:
++                    # 打牌→（待機）→トグル の順に実行される
++                    return_points.append(Point(-1, -1, post))
++                    return_points += toggle_pts
++                    logger.debug(f"[NAKI-TOGGLE] scheduled after dahai with +{post:.2f}s")
++            except Exception as _e:
++                logger.debug(f"[NAKI-TOGGLE] post-dahai scheduling error: {_e}")
++
+             # 連鎖鳴きは自打牌確定で終了
+             self._maybe_stop_naki_chain_on_discard()
+ 

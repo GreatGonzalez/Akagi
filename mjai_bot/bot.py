@@ -5,6 +5,8 @@ from mjai import Bot
 from dataclasses import dataclass
 from mjai.mlibriichi.state import PlayerState  # type: ignore
 from .logger import logger
+from .akagi_policy import PolicyContext, ExpectedValueEngine
+
 
 # --- ラス回避 / 安全評価 ---
 from .strategy.last_avoid import TableState, MoveCandidate, LastAvoidConfig, choose_with_last_avoid
@@ -32,6 +34,32 @@ class AkagiBot(Bot):
         self.__call_events = []
         self.__dora_indicators = []
         self.__cfg_last_avoid = LastAvoidConfig()
+       # policy出力（UI層が読む想定）
+        self.policy_allow_reach = True
+        self.policy_allow_pon   = True
+        self.policy_allow_chi   = True
+        self.policy_allow_kan   = True
+        # policy内部デフォルト（既存propertyが無い/未初期化時のフォールバック）
+        self._policy_default_scores     = [25000, 25000, 25000, 25000]
+        self._policy_default_player_id  = 0
+        self._policy_current_basepoint  = 2600.0
+        self._policy_is_oras            = False
+        self._policy_opponent_threat    = False
+        # 精密化に使う内部推定（自由に上書き可。既存property名と被らないよう _policy_ 接頭）
+        self._policy_turns_left         = 12
+        self._policy_is_ryanmen         = True
+        self._policy_shanten            = 1
+        self._policy_safety_score       = 0.5
+        self._policy_genbutsu_count     = 3
+        self._policy_suji_count         = 6
+        self._policy_wall_info          = 0.0
+        self._policy_red_count          = 0
+        self._policy_dora_visible_count = 0
+        self._policy_est_win_rate       = 0.18
+        self._policy_est_deal_in_rate   = 0.07
+        self._policy_est_tempai_rate    = 0.45
+        self._policy_est_basepoint      = 2600.0
+        self._policy_est_call_speed     = 1.0
 
         # ざっくり順目カウンタ（配牌後0、以後各打牌で+1）
         self.__turn_counter = 0
@@ -43,6 +71,11 @@ class AkagiBot(Bot):
         """
         Safety-first discard with last-avoid layer. Fallback: tsumogiri.
         """
+        try:
+            self.update_policy()
+        except Exception as e:
+            # フェイルセーフ：ポリシーで落ちないように
+            pass
         if self.can_discard:
             try:
                 # 候補: 手牌の各牌 + ツモ切り（必ず1つはある）
@@ -373,3 +406,120 @@ class AkagiBot(Bot):
             self.can_kan
             # self.tehai_vec34[9*3+3] > 0 # nukidora
         )
+
+    def _estimate_shape_features(self):
+        """
+        形に関する粗い推定値を返す。
+        既存に強い推定器があればそちらを使ってOK。
+        """
+        # 例: 聴牌率・和了率・放銃率・基礎打点を既存評価器から取得
+        # 無ければ簡易に現状の牌姿やドラ枚数などから推定する。
+
+        win_rate = self._get_float_safe("est_win_rate",       getattr(self, "_policy_est_win_rate", 0.18))
+        deal_in  = self._get_float_safe("est_deal_in_rate",   getattr(self, "_policy_est_deal_in_rate", 0.07))
+        tempai   = self._get_float_safe("est_tempai_rate",    getattr(self, "_policy_est_tempai_rate", 0.45))
+        # basepoint は本体が expose していないことも多い → policy内のデフォルトへフォールバック
+        basept_raw = getattr(self, "est_basepoint", getattr(self, "_policy_est_basepoint", 2600.0))
+        basept_cur = getattr(self, "current_hand_basepoint", getattr(self, "_policy_current_basepoint", 2600.0))
+        basept   = float(basept_raw if basept_raw is not None else basept_cur)
+        speed    = self._get_float_safe("est_call_speed_gain", getattr(self, "_policy_est_call_speed", 1.0))
+        return win_rate, deal_in, tempai, basept, speed
+
+    def update_policy(self):
+        """毎巡呼び出し、UI層が参照するポリシーフラグを更新する"""
+        win, lose, tempai, basept, speed = self._estimate_shape_features()
+        scores = self._get_scores_safe()
+        pid = self._get_player_id_safe()
+        my_score = int(scores[pid]) if 0 <= pid < len(scores) else 25000
+        other_scores = [int(s) for i, s in enumerate(scores) if i != pid]
+        ctx = PolicyContext(
+            my_score=my_score,
+            other_scores=other_scores,
+            player_id=int(pid),
+            is_oras=bool(self._get_is_oras_safe()),
+            is_dealer=bool(getattr(self, "is_dealer", False)),
+            riichi_declared_count=int(self.riichi_declared_count),
+            opponent_threat=bool(self.opponent_threat),
+            last_discard_is_yakuhai=bool(self.last_discard_is_yakuhai),
+            win_rate=float(win),
+            deal_in_rate=float(lose),
+            tempai_rate=float(tempai),
+            basepoint=float(basept),
+            call_speed_gain=float(speed),
+            turns_left=int(getattr(self, "turns_left", getattr(self, "_policy_turns_left", 12))),
+            is_ryanmen=bool(getattr(self, "is_ryanmen_flag", getattr(self, "_policy_is_ryanmen", True))),
+            shanten=int(self._get_shanten_safe()),
+            safety_score=float(getattr(self, "safety_score", getattr(self, "_policy_safety_score", 0.5))),
+            genbutsu_count=int(getattr(self, "genbutsu_count", getattr(self, "_policy_genbutsu_count", 3))),
+            suji_count=int(getattr(self, "suji_count", getattr(self, "_policy_suji_count", 6))),
+            wall_info=float(getattr(self, "wall_info", getattr(self, "_policy_wall_info", 0.0))),
+            red_count=int(getattr(self, "red_count", getattr(self, "_policy_red_count", 0))),
+            dora_visible_count=int(getattr(self, "dora_visible_count", getattr(self, "_policy_dora_visible_count", 0))),
+        )
+        dec = ExpectedValueEngine.decide(ctx)
+        # UI層で使う公開属性に反映
+        self.policy_allow_reach = bool(dec.allow_reach)
+        self.policy_allow_pon   = bool(dec.allow_pon)
+        self.policy_allow_chi   = bool(dec.allow_chi)
+        self.policy_allow_kan   = bool(dec.allow_kan)
+        # 補助情報も公開（UI層のgetattrで読まれる）
+        # 書き戻しは property かもしれないので try/except で安全に。失敗時は _policy_* に保存
+        try:    self.current_hand_basepoint = float(dec.expected_basepoint)
+        except Exception: self._policy_current_basepoint = float(dec.expected_basepoint)
+        try:    self.opponent_threat = bool(dec.threat)
+        except Exception: self._policy_opponent_threat = bool(dec.threat)
+        # is_oras は大抵フレーム側で管理されるので上書きしない方が安全
+        # try:    self.is_oras = bool(dec.oras)
+        # except Exception: self._policy_is_oras = bool(dec.oras)
+        # 任意: デバッグ出力
+        try:
+            from .logger import logger
+            logger.debug(f"[POLICY] mode={dec.eval_mode} EV(reach/dama/call)={dec.reach_ev:.1f}/{dec.dama_ev:.1f}/{dec.call_ev:.1f} "
+                        f"allow R/P/C/K={self.policy_allow_reach}/{self.policy_allow_pon}/{self.policy_allow_chi}/{self.policy_allow_kan} "
+                        f"bp={self.current_hand_basepoint:.0f} turns_left={self.turns_left}")
+        except Exception:
+            pass
+
+    # ---- scores / player_id を取得するヘルパ ----
+    def _get_scores_safe(self) -> list[int]:
+        """本体に scores があればそれを使い、無ければデフォルト。"""
+        try:
+            s = getattr(self, "scores")  # 既存 property（read-only想定）
+            if isinstance(s, (list, tuple)) and len(s) >= 4:
+                return [int(x) for x in s]
+        except Exception:
+            pass
+        # いくつか別名で持っているケースに対応（無ければデフォルト）
+        for name in ("_scores", "__scores", "_state_scores"):
+            try:
+                s = getattr(self, name)
+                if isinstance(s, (list, tuple)) and len(s) >= 4:
+                    return [int(x) for x in s]
+            except Exception:
+                pass
+        return list(getattr(self, "_policy_default_scores", [25000,25000,25000,25000]))
+
+    def _get_player_id_safe(self) -> int:
+        """本体に player_id があればそれを使い、無ければデフォルト。"""
+        try:
+            return int(getattr(self, "player_id"))
+        except Exception:
+            return int(getattr(self, "_policy_default_player_id", 0))
+        
+    def _get_is_oras_safe(self) -> bool:
+        try:
+            return bool(getattr(self, "is_oras"))
+        except Exception:
+            return bool(getattr(self, "_policy_is_oras", False))
+
+    def _get_shanten_safe(self) -> int:
+        # 本体に shanten property があるが read-only のケースがある → 参照のみ
+        try:
+            return int(getattr(self, "shanten"))
+        except Exception:
+            return int(getattr(self, "_policy_shanten", 1))
+    def _get_float_safe(self, name: str, default: float) -> float:
+        try:
+            return float(getattr(self, name))
+        except Exception:
+            return float(default)

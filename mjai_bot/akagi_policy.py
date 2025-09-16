@@ -56,6 +56,13 @@ RED_COUNT_BONUS_PER       = _getf("AKAGI_RED_COUNT_BONUS_PER", 0.06)
 CLAMP_MIN_RATE            = 0.01
 CLAMP_MAX_RATE            = 0.97
 
+# 大差対策（南3のケースを含む一般化）
+LAST_GAP_LARGE                = _getf("AKAGI_LAST_GAP_LARGE", 8000.0)
+LAST_GAP_REACH_BOOST          = _getf("AKAGI_LAST_GAP_REACH_BOOST", 1.15)
+LAST_GAP_CALL_PENALTY         = _getf("AKAGI_LAST_GAP_CALL_PENALTY", 0.85)
+LAST_GAP_CALL_MIN_BASEPOINT   = _getf("AKAGI_LAST_GAP_CALL_MIN_BASEPOINT", 5200.0)
+LAST_GAP_YAKUHAI_FORBID_UNDER = _getf("AKAGI_LAST_GAP_YAKUHAI_FORBID_UNDER", 2600.0)
+
 # ================= Data Models =================
 @dataclass
 class PolicyContext:
@@ -113,6 +120,12 @@ def _is_last(my: int, others: List[int]) -> bool:
 
 def _table_threat(ctx: PolicyContext) -> bool:
     return ctx.riichi_declared_count > 0 or ctx.opponent_threat
+
+def _gap_to_next_place(my: int, others: List[int]) -> int:
+    """自分より上の最も近いスコアとの差（上がいなければ0）。ラス目なら3位との差。"""
+    higher = [s for s in others if s > my]
+    return (min(higher) - my) if higher else 0
+
 
 def _clamp01(x: float) -> float:
     return max(CLAMP_MIN_RATE, min(CLAMP_MAX_RATE, x))
@@ -216,8 +229,14 @@ class ExpectedValueEngine:
             reach_bonus *= EV_REACH_LEAD_UPWEIGHT
         gain = win * bp * reach_bonus
         cost = lose * bp * EV_REACH_RISK_AVERSION * (1.2 if _table_threat(ctx) else 1.0)
-        if _is_last(ctx.my_score, ctx.other_scores):
+        is_last = _is_last(ctx.my_score, ctx.other_scores)
+        if is_last:
             gain *= EV_LAST_ESCAPE_BONUS
+        # --- ラス目かつ大差＆終盤なら門前リーチを優遇 ---
+        if is_last:
+            gap = _gap_to_next_place(ctx.my_score, ctx.other_scores)
+            if gap >= LAST_GAP_LARGE and ctx.turns_left <= 6:
+                gain *= LAST_GAP_REACH_BOOST
 
         if EV_MODE == "placement":
             return _simulate_placement_ev(ctx, win, lose, bp * reach_bonus)
@@ -246,8 +265,14 @@ class ExpectedValueEngine:
         bp  = max(1000.0, ctx.basepoint * (0.75 + 0.1 * ctx.call_speed_gain))
         gain = win * bp
         cost = lose * bp * EV_REACH_RISK_AVERSION
-        if _is_last(ctx.my_score, ctx.other_scores) and ctx.is_oras:
+        is_last = _is_last(ctx.my_score, ctx.other_scores)
+        if is_last and ctx.is_oras:
             gain *= (EV_LAST_ESCAPE_BONUS + 0.05)
+        # --- ラス目かつ大差＆終盤なら副露EVを減衰（安手のスピード鳴き抑制） ---
+        if is_last:
+            gap = _gap_to_next_place(ctx.my_score, ctx.other_scores)
+            if gap >= LAST_GAP_LARGE and ctx.turns_left <= 6:
+                gain *= LAST_GAP_CALL_PENALTY
 
         if EV_MODE == "placement":
             return _simulate_placement_ev(ctx, win, lose, bp)
@@ -278,6 +303,16 @@ class ExpectedValueEngine:
             allow_pon = False
         if call_ev < -200.0 and not (ctx.is_oras and _is_last(ctx.my_score, ctx.other_scores)):
             allow_pon = False
+        # --- ラス目・大差・終盤の特別ルール ---
+        if _is_last(ctx.my_score, ctx.other_scores):
+            gap = _gap_to_next_place(ctx.my_score, ctx.other_scores)
+            if gap >= LAST_GAP_LARGE and ctx.turns_left <= 6:
+                # 役牌ポンの原則禁止（一定打点未満）
+                if ctx.last_discard_is_yakuhai and ctx.basepoint < LAST_GAP_YAKUHAI_FORBID_UNDER:
+                    allow_pon = False
+                # 鳴きは最低打点を満たす場合のみ許容（リーチ逆転ルート優先）
+                if ctx.basepoint < LAST_GAP_CALL_MIN_BASEPOINT:
+                    allow_pon = False
 
         allow_chi = allow_pon
 
@@ -287,6 +322,15 @@ class ExpectedValueEngine:
             allow_kan = False
         if EV_FORBID_KAN_TOP_LEAD and _lead_margin(ctx.my_score, ctx.other_scores) >= EV_REACH_TOP_LEAD_MARGIN:
             allow_kan = False
+
+        try:
+            gap = _gap_to_next_place(ctx.my_score, ctx.other_scores)
+            print(f"[POLICY][GAP] last={_is_last(ctx.my_score, ctx.other_scores)} gap={gap} "
+                f"turns_left={ctx.turns_left} base={ctx.basepoint:.0f} "
+                f"EV reach/dama/call={reach_ev:.1f}/{dama_ev:.1f}/{call_ev:.1f} "
+                f"allow R/P/C/K={allow_reach}/{allow_pon}/{allow_chi}/{allow_kan}")
+        except Exception:
+            pass
 
         return PolicyDecision(
             allow_reach=allow_reach,

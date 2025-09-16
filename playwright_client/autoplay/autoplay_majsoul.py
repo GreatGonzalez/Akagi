@@ -353,6 +353,8 @@ class AutoPlayMajsoul(object):
         elif mjai_msg['type'] == 'none':
             pre = max(0.0, NAKI_NONE_PREWAIT)
             return_points.append(Point(-1, -1, pre))
+        
+        target_type = ACTION2TYPE[mjai_msg['type']]
 
         for idx, operation in enumerate(operation_list):
             if operation == ACTION2TYPE[mjai_msg['type']]:
@@ -364,9 +366,31 @@ class AutoPlayMajsoul(object):
                 elif mjai_msg['type'] == 'zimo':
                     btn_wait = AKAGI_TSUMO_WAIT
                 elif mjai_msg['type'] == 'ryukyoku':
+                    # クリック位置は立直ボタンのスロット。待機時間は従来通りリーチ相当。
                     btn_wait = AKAGI_REACH_WAIT
                 else:
                     btn_wait = max(0.0, NAKI_BUTTON_WAIT + random.uniform(-0.02, 0.02))
+
+                # デフォルトは「並べ替え済みの表示順」で自分自身の idx を使う
+                try:
+                    target_idx = operation_list.index(target_type)
+                except ValueError:
+                    target_idx = None
+
+                # 流局は「立直と同じスロット」をクリックする
+                if mjai_msg['type'] == 'ryukyoku':
+                    # その場の並び（表示候補）に仮想的に 'reach' を足して、同じ優先度並びでスロットを決める
+                    virt = list(set(operation_list))  # 重複削除してから
+                    if 7 not in virt:                 # 7 = reach
+                        virt.append(7)
+                    virt.sort(key=lambda x: ACTION_PIORITY[x])
+                    # 立直が並びの何番目か＝そのスロットを流局でクリック
+                    reach_idx = virt.index(7)
+                    target_idx = reach_idx
+
+                # 念のため最後のフォールバック（存在しない/算出失敗時は中央寄りを叩く）
+                if target_idx is None or target_idx >= len(LOCATION['actions']):
+                    target_idx = min(4, len(LOCATION['actions'])-1)  # 安全側
 
                 return_points.append(
                     Point(

@@ -1266,31 +1266,50 @@ def run_fixed_postgame_sequence(page: Page) -> None:
 def run_auto_start_sequence(page: Page) -> None:
     """
     「対戦開始」導線。
-    - 段位戦 -> 金の間/王の間 -> 四人南 の順にクリック
-    - それぞれマーカー付きで証跡を残す
+    - 段位戦 -> （level_id_4 により 金の間 or 玉の間） -> 四人南 の順にクリック
+    条件:
+      level_id_4 が 10302, 10303, 10401 のいずれか → 金の間
+      level_id_4 が 10402 以上 → 玉の間
+      それ以外 / 取得不能 → 既定で金の間
     """
     logger.info("[auto-start] begin")
     page.wait_for_timeout(10_000)
 
     # 段位戦
     _ensure_viewport(page, need_w=900+10, need_h=180+10)
-    # _snap_with_marker(page, 900, 180, "start1_ranked")
     page.mouse.click(900, 180)
     page.wait_for_timeout(3_000)
 
-    # 金の間（必要なら）
-    _ensure_viewport(page, need_w=900+10, need_h=500+10)
-    page.mouse.click(900, 500)
-    page.wait_for_timeout(3_000)
+    # --- 追加: 実際のアカウントから level_id_4 を取得して分岐 ---
+    tap_gold = True  # 既定は金の間
+    try:
+        rank_info = fetch_current_rank_ids(page) or {}
+        level_id_4 = _as_int(rank_info.get("level_id_4"))
+        notify_log.info(f"[auto-start] detected level_id_4={level_id_4}")
 
-    # 王の間（本コードではこちらを選択）
-    # _ensure_viewport(page, need_w=900+10, need_h=600+10)
-    # page.mouse.click(900, 600)
-    # page.wait_for_timeout(3_000)
+        if level_id_4 in (10301, 10302, 10303):
+            tap_gold = True
+            notify_log.info(f"[auto-start] level_id_4={level_id_4} -> 金の間を選択")
+        elif level_id_4 is not None and level_id_4 >= 10401:
+            tap_gold = False
+            notify_log.info(f"[auto-start] level_id_4={level_id_4} -> 玉の間を選択")
+        else:
+            notify_log.info(f"[auto-start] level_id_4={level_id_4} (未定義/その他) -> 金の間(既定)を選択")
+    except Exception as e:
+        notify_log.warning(f"[auto-start] level_id_4 の取得に失敗: {e} -> 金の間(既定)を選択")
+
+    # 金の間 / 玉の間
+    if tap_gold:
+        _ensure_viewport(page, need_w=900+10, need_h=500+10)
+        page.mouse.click(900, 500)   # 金の間
+    else:
+        _ensure_viewport(page, need_w=900+10, need_h=600+10)
+        page.mouse.click(900, 600)   # 玉の間（UIに合わせて必要なら調整）
+    page.wait_for_timeout(3_000)
+    # --- 追加ここまで ---
 
     # 四人南
     _ensure_viewport(page, need_w=900+10, need_h=400+10)
-    # _snap_with_marker(page, 900, 400, "start3_4p_south")
     page.mouse.click(900, 400)
     page.wait_for_timeout(3_000)
 

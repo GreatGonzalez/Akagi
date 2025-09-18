@@ -26,9 +26,9 @@ def _geti(name: str, default: int) -> int:
         return default
 
 # --- Waits (human-like timing) ---
-NAKI_PREWAIT = _getf("AKAGI_NAKI_PREWAIT", 1.00)
+NAKI_PREWAIT = _getf("AKAGI_NAKI_PREWAIT", 1.50)
 AKAGI_REACH_WAIT = _getf("AKAGI_REACH_WAIT", 1.50)
-AKAGI_RON_WAIT = _getf("AKAGI_RON_WAIT", 1.00)
+AKAGI_RON_WAIT = _getf("AKAGI_RON_WAIT", 1.50)
 AKAGI_TSUMO_WAIT = _getf("AKAGI_TSUMO_WAIT", 1.00)
 NAKI_BUTTON_WAIT = _getf("AKAGI_NAKI_BUTTON_WAIT", 0.50)
 NAKI_CAND_WAIT = _getf("AKAGI_NAKI_CAND_WAIT", 0.05)
@@ -287,9 +287,9 @@ class AutoPlayMajsoul(object):
 
         if mjai_msg['type'] == 'dahai' and not self.bot.self_riichi_accepted:
             # Wait scheme: light random + dealer first-discard extra
-            random_time = random.uniform(0.5, 0.6)
+            random_time = random.uniform(0.6, 1.2)
             if not self.bot.last_kawa_tile:
-                random_time = max(random_time, 0.6)
+                random_time = max(random_time, 1.2)
                 try:
                     dealer = getattr(self.bot, "_AkagiBot__dealer", None)
                     myid = getattr(self.bot, "player_id", None)

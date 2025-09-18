@@ -27,7 +27,7 @@ import webbrowser
 from dataclasses import dataclass
 from typing import Dict, Tuple
 
-CLIENT_ID = os.environ.get("X_CLIENT_ID") or ""
+CLIENT_ID = os.environ.get("X_CLIENT_ID") or "d1FOWThFRHk0R0ZLUHJ0TVlsbUM6MTpjaQ"
 REDIRECT_URI = os.environ.get("X_REDIRECT_URI") or "http://127.0.0.1:9876/callback"
 SCOPES = os.environ.get("X_SCOPES") or "tweet.write tweet.read users.read offline.access"
 TOKEN_FILE = os.environ.get("X_TOKEN_FILE") or "./x_tokens.json"

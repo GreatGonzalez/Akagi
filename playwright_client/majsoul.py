@@ -34,11 +34,308 @@ LINE_USER_ID              = os.getenv("LINE_USER_ID", "U1c2db82d9871049d72d5e26f
 SLACK_BOT_TOKEN  = os.getenv("SLACK_BOT_TOKEN", "xoxb-9401305398708-9397678472290-hPiRJGAY7nQhhcNWC3em0jIi")
 SLACK_CHANNEL_ID = os.getenv("SLACK_CHANNEL_ID", "C09BT8ZHYTE")
 
-# ★ 追加: 段位しきい値（≦なら開始）
-AKAGI_MAX_RANK_ID_4P = os.getenv("AKAGI_MAX_RANK_ID_4P", "10402")  # 例: "10401"（四麻 雀豪1 など）
+# 段位しきい値（≦なら開始）
+AKAGI_MAX_RANK_ID_4P = os.getenv("AKAGI_MAX_RANK_ID_4P", "10403")  # 例: "10401"（四麻 雀豪1 など）
 AKAGI_MAX_RANK_ID_3P = os.getenv("AKAGI_MAX_RANK_ID_3P")  # 例: "20302"（三麻 雀傑2 など）
 
+LEVEL_ID_4_TO_NAME = {
+    10101: "初心1",
+    10102: "初心2",
+    10103: "初心3",
+    10201: "雀士1",
+    10202: "雀士2",
+    10203: "雀士3",
+    10301: "雀傑1",
+    10302: "雀傑2",
+    10303: "雀傑3",
+    10401: "雀豪1",
+    10402: "雀豪2",
+    10403: "雀豪3",
+    10501: "雀聖1",
+    10502: "雀聖2",
+    10503: "雀聖3",
+    10601: "魂天",
+    # 必要に応じて追加
+}
+
+
 _PROOF_DIR = Path("logs/click_proof"); _PROOF_DIR.mkdir(parents=True, exist_ok=True)
+
+# === X (OAuth 2.0 / Authorization Code + PKCE) ===
+import base64, hashlib, http.server, urllib.parse, urllib.request, webbrowser, secrets
+
+X_CLIENT_ID   = os.getenv("X_CLIENT_ID", "d1FOWThFRHk0R0ZLUHJ0TVlsbUM6MTpjaQ")
+X_REDIRECT_URI= os.getenv("X_REDIRECT_URI", "http://127.0.0.1:9876/callback")
+X_SCOPES      = os.getenv("X_SCOPES", "tweet.write tweet.read users.read offline.access")
+X_TOKEN_FILE  = os.getenv("X_TOKEN_FILE", "./x_tokens.json")
+X_TWEET_ENABLE= os.getenv("X_TWEET_ENABLE", "1") == "1"
+
+AUTH_URL  = "https://twitter.com/i/oauth2/authorize"
+TOKEN_URL = "https://api.twitter.com/2/oauth2/token"
+TWEET_URL = "https://api.twitter.com/2/tweets"
+
+def _b64url_no_pad(b: bytes) -> str:
+    return base64.urlsafe_b64encode(b).decode().rstrip("=")
+
+def _now() -> int:
+    return int(time.time())
+
+def _load_tokens() -> dict:
+    if not os.path.exists(X_TOKEN_FILE):
+        return {}
+    with open(X_TOKEN_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+def _save_tokens(tokens: dict) -> None:
+    with open(X_TOKEN_FILE, "w", encoding="utf-8") as f:
+        json.dump(tokens, f, ensure_ascii=False, indent=2)
+
+@dataclass
+class _PKCE:
+    verifier: str
+    challenge: str
+    state: str
+
+def _make_pkce() -> _PKCE:
+    verifier  = _b64url_no_pad(secrets.token_bytes(64))[:64]
+    challenge = _b64url_no_pad(hashlib.sha256(verifier.encode()).digest())
+    state     = _b64url_no_pad(secrets.token_bytes(16))
+    return _PKCE(verifier, challenge, state)
+
+class _AuthHandler(http.server.BaseHTTPRequestHandler):
+    received: dict[str, str] = {}
+    def do_GET(self):
+        q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        code = q.get("code", [None])[0]
+        state = q.get("state", [""])[0]
+        self.send_response(200)
+        self.send_header("Content-Type","text/html; charset=utf-8")
+        self.end_headers()
+        if code:
+            _AuthHandler.received = {"code": code, "state": state}
+            self.wfile.write(b"<h2>Authorization complete.</h2><p>You can close this tab.</p>")
+        else:
+            self.wfile.write(b"<h2>No code found.</h2>")
+    def log_message(self, *a, **k): pass
+
+def _wait_code(port: int, timeout_sec: int = 300) -> dict:
+    srv = http.server.HTTPServer(("127.0.0.1", port), _AuthHandler)
+    srv.socket.settimeout(1.0)
+    start = _now()
+    try:
+        while _now() - start < timeout_sec:
+            srv.handle_request()
+            if _AuthHandler.received.get("code"):
+                return _AuthHandler.received
+        raise TimeoutError("Timed out waiting for authorization code.")
+    finally:
+        try: srv.server_close()
+        except: pass
+
+def _build_auth_url(client_id: str, redirect_uri: str, scopes: str, code_challenge: str, state: str) -> str:
+    q = {
+        "response_type": "code",
+        "client_id": client_id,
+        "redirect_uri": redirect_uri,
+        "scope": " ".join(scopes.split()),
+        "state": state,
+        "code_challenge": code_challenge,
+        "code_challenge_method": "S256",
+    }
+    return "https://twitter.com/i/oauth2/authorize?" + urllib.parse.urlencode(q)
+
+def _auth_header_basic_with_client_id_only(client_id: str) -> str:
+    # client_secretを発行していないPKCEアプリ向け: "client_id:" をBase64
+    raw = (client_id + ":").encode("utf-8")
+    return "Basic " + base64.b64encode(raw).decode("ascii")
+
+def _urlopen_json(req: urllib.request.Request) -> tuple[int, dict]:
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            body = resp.read().decode("utf-8")
+            return resp.status, (json.loads(body) if body else {})
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="ignore")
+        try:
+            return e.code, (json.loads(body) if body else {})
+        except Exception:
+            return e.code, {"error": body}
+    except Exception as e:
+        return 0, {"error": str(e)}
+
+def _exchange_code_for_tokens(client_id: str, code: str, redirect_uri: str, code_verifier: str) -> dict:
+    payload = {
+        "client_id": client_id,
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": redirect_uri,
+        "code_verifier": code_verifier,
+    }
+    headers = {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Authorization": _auth_header_basic_with_client_id_only(client_id),
+    }
+    req = urllib.request.Request(TOKEN_URL, data=urllib.parse.urlencode(payload).encode(), headers=headers, method="POST")
+    status, data = _urlopen_json(req)
+    if status == 200 and "access_token" in data:
+        data["expires_at"] = _now() + int(data.get("expires_in", 0))
+    return data
+
+def _refresh_tokens(client_id: str, refresh_token: str) -> dict:
+    payload = {
+        "client_id": client_id,
+        "grant_type": "refresh_token",
+        "refresh_token": refresh_token,
+    }
+    headers = {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Authorization": _auth_header_basic_with_client_id_only(client_id),
+    }
+    req = urllib.request.Request(TOKEN_URL, data=urllib.parse.urlencode(payload).encode(), headers=headers, method="POST")
+    status, data = _urlopen_json(req)
+    if status == 200 and "access_token" in data:
+        data["expires_at"] = _now() + int(data.get("expires_in", 0))
+    return data
+
+def _ensure_x_access_token(interactive: bool = False) -> str | None:
+    """
+    初回はブラウザで認可 → ローカルHTTPでcode受領 → トークン保存。
+    既に保存済みなら自動リフレッシュ。
+    interactive=False のとき、未認可なら None を返す（メインループをブロックしないため）。
+    """
+    if not X_CLIENT_ID:
+        notify_log.error("X_CLIENT_ID 未設定"); return None
+
+    tokens = _load_tokens()
+    if tokens.get("access_token"):
+        if tokens.get("expires_at") and _now() < int(tokens["expires_at"]) - 60:
+            return tokens["access_token"]
+        if tokens.get("refresh_token"):
+            new_tokens = _refresh_tokens(X_CLIENT_ID, tokens["refresh_token"])
+            if "access_token" in new_tokens:
+                if "refresh_token" not in new_tokens and "refresh_token" in tokens:
+                    new_tokens["refresh_token"] = tokens["refresh_token"]
+                _save_tokens(new_tokens)
+                return new_tokens["access_token"]
+            notify_log.warning("[X] refresh failed, need re-auth")
+
+    if not interactive:
+        # 非対話モードではブロックしない
+        return None
+
+    # 対話モード：認可フロー開始
+    pkce = _make_pkce()
+    auth_url = _build_auth_url(X_CLIENT_ID, X_REDIRECT_URI, X_SCOPES, pkce.challenge, pkce.state)
+    notify_log.info(f"[X] Open auth URL: {auth_url}")
+    try: webbrowser.open(auth_url)
+    except: pass
+    port = urllib.parse.urlparse(X_REDIRECT_URI).port or 9876
+    received = _wait_code(port)
+    if "code" not in received:
+        notify_log.error("[X] 認可コード受領失敗"); return None
+    data = _exchange_code_for_tokens(X_CLIENT_ID, received["code"], X_REDIRECT_URI, pkce.verifier)
+    if "access_token" not in data:
+        notify_log.error(f"[X] トークン交換失敗: {data}"); return None
+    _save_tokens(data)
+    return data["access_token"]
+
+def send_x_post_api(message: str,
+                    max_retries: int = 3,
+                    timeout_sec: int = 10,
+                    interactive_auth: bool = False) -> bool:
+    """
+    X API v2 でツイート。トークンは PKCE フローで自動取得/更新。
+    初回未認可の場合、interactive_auth=True ならブラウザで認可を開始。
+    """
+    if not X_TWEET_ENABLE:
+        notify_log.info("[X] tweet disabled by X_TWEET_ENABLE=0")
+        return True
+
+    token = _ensure_x_access_token(interactive=interactive_auth)
+    if not token:
+        notify_log.error("[X] access_token unavailable (未認可 or 設定不備)")
+        return False
+
+    url = TWEET_URL
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json; charset=utf-8",
+    }
+    payload = {"text": message if len(message) <= 280 else (message[:279] + "…")}
+
+    if AKAGI_DEBUG_NOTIFY:
+        notify_log.info(f"[X] post -> payload={json.dumps(payload, ensure_ascii=False)[:300]}")
+    else:
+        notify_log.info("[X] post -> payload=(masked)")
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            resp = requests.post(url, headers=headers, json=payload, timeout=timeout_sec)
+
+            if resp.status_code == 429:
+                retry_after = int(resp.headers.get("Retry-After", "1"))
+                notify_log.warning(f"[X] 429 Too Many Requests, retry after {retry_after}s (attempt {attempt}/{max_retries})")
+                time.sleep(retry_after)
+                continue
+
+            data = {}
+            try: data = resp.json()
+            except Exception: pass
+
+            if 200 <= resp.status_code < 300 and data.get("data", {}).get("id"):
+                notify_log.info(f"[X] sent OK (id={data['data']['id']})")
+                return True
+
+            snippet = resp.text[:500]
+            if resp.status_code in (400, 401, 403):
+                notify_log.error(f"[X] auth/perm error {resp.status_code}: {snippet}")
+                # 認可が消えていたら次回対話で認可できるように token ファイルを消すオプションもあり
+                return False
+
+            notify_log.error(f"[X] API error: {resp.status_code} {snippet}")
+        except requests.Timeout:
+            notify_log.error("[X] timeout")
+        except Exception as e:
+            notify_log.exception(f"[X] exception: {e}")
+
+        sleep_sec = 2 ** attempt
+        notify_log.warning(f"[X] retrying in {sleep_sec}s (attempt {attempt}/{max_retries})")
+        time.sleep(sleep_sec)
+
+    return False
+
+# --- (任意) 画像付きポスト: v1.1 media/upload → v2/tweets ---
+def _x_upload_media(filepath: str) -> str | None:
+    token = _ensure_x_access_token()
+    if not token: return None
+    url = "https://upload.twitter.com/1.1/media/upload.json"
+    with open(filepath, "rb") as f:
+        files = {"media": f}
+        headers = {"Authorization": f"Bearer {token}"}
+        resp = requests.post(url, headers=headers, files=files, timeout=30)
+    if resp.ok:
+        return resp.json().get("media_id_string")
+    notify_log.error(f"[X] media upload failed: {resp.status_code} {resp.text[:200]}")
+    return None
+
+def send_x_post_with_images(message: str, image_paths: list[str]) -> bool:
+    token = _ensure_x_access_token()
+    if not token: return False
+    mids = []
+    for p in image_paths[:4]:
+        mid = _x_upload_media(p)
+        if mid: mids.append(mid)
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    payload = {"text": message}
+    if mids: payload["media"] = {"media_ids": mids}
+    resp = requests.post(TWEET_URL, headers=headers, json=payload, timeout=30)
+    ok = (200 <= resp.status_code < 300)
+    if ok:
+        notify_log.info("[X] sent with images OK")
+    else:
+        notify_log.error(f"[X] image tweet error {resp.status_code}: {resp.text[:300]}")
+    return ok
+
 
 def wait_for_account_ready(page: Page, timeout_ms: int = 180_000, poll_ms: int = 500) -> bool:
     """
@@ -681,88 +978,6 @@ def _snap_with_marker(page: Page, x: int, y: int, label: str) -> str:
 # Post-game helpers (module-level)
 # =========================
 
-@dataclass
-class PostGameButtons:
-    # 1600x900 前提の相対座標（Canvas用）。確認は実測ベースでやや下寄せ。
-    confirm_rel_x: float = 0.905
-    confirm_rel_y: float = 0.928
-    play_again_rel_x: float = 0.690
-    play_again_rel_y: float = 0.865
-
-# UIテキスト候補（DOMが取れる環境向け。Canvas時は無視される）
-NAMES_CONFIRM = [r"確認", r"Confirm", r"确\s*认", r"確認する"]
-NAMES_PLAY_AGAIN = [r"もう一局", r"再戦", r"もう一回", r"もう一度", r"Play\s*Again", r"再\s*来\s*一\s*局"]
-
-
-def _click_rel(page: Page, rx: float, ry: float, delay_ms: int = 80) -> None:
-    vp = page.viewport_size or {"width": 1600, "height": 900}
-    x = int(vp["width"] * rx)
-    y = int(vp["height"] * ry)
-    page.mouse.click(x, y)
-    page.wait_for_timeout(delay_ms)
-
-
-def _find_any(page: Page, names: list[str]) -> bool:
-    """DOM上にボタンっぽい要素が見えているか（Canvasだと基本 False）"""
-    try:
-        for nm in names:
-            if page.get_by_text(re.compile(nm), exact=False).count() > 0:
-                return True
-            if page.get_by_role("button", name=re.compile(nm)).count() > 0:
-                return True
-    except Exception:
-        pass
-    return False
-
-
-def _click_dom_button(page: Page, names: list[str], delay_ms: int = 120) -> bool:
-    """DOMターゲットを押す（見つからなければ False）"""
-    for nm in names:
-        try:
-            btn = page.get_by_role("button", name=re.compile(nm))
-            if btn.count() > 0:
-                btn.first.click(timeout=600)
-                page.wait_for_timeout(delay_ms)
-                return True
-        except Exception:
-            pass
-        try:
-            loc = page.get_by_text(re.compile(nm), exact=False)
-            if loc.count() > 0:
-                loc.first.click(timeout=600)
-                page.wait_for_timeout(delay_ms)
-                return True
-        except Exception:
-            pass
-    return False
-
-
-def is_post_game_screen(page: Page) -> bool:
-    """“本当に”リザルト～待機画面か（DOMで見えている場合のみ True／Canvasは基本 False）"""
-    return _find_any(page, NAMES_CONFIRM) or _find_any(page, NAMES_PLAY_AGAIN)
-
-
-def _click_cloud(page: Page, rx: float, ry: float, step_px: int = 8, max_px: int = 32, delay_ms: int = 80) -> bool:
-    """
-    相対座標 (rx, ry) を中心に微小スキャン（Canvas対策）。押せたら True。
-    """
-    vp = page.viewport_size or {"width": 1600, "height": 900}
-    cx, cy = int(vp["width"] * rx), int(vp["height"] * ry)
-    offsets = [(0, 0)]
-    for r in range(step_px, max_px + 1, step_px):
-        offsets.extend([
-            ( r, 0), (-r, 0), (0,  r), (0, -r),
-            ( r,  r), ( r, -r), (-r,  r), (-r, -r),
-        ])
-    for dx, dy in offsets:
-        page.mouse.click(cx + dx, cy + dy)
-        page.wait_for_timeout(delay_ms)
-        # 押せた時は画面から確認/もう一局が消えることが多い
-        if not is_post_game_screen(page):
-            return True
-    return False
-
-
 class PostGameGuard:
     """直近アクティビティ時刻を管理して、一定時間“静止”している時だけ後片付けを許可"""
     def __init__(self) -> None:
@@ -1064,6 +1279,27 @@ class PlaywrightController:
                                 # send_line_message_api(message=body)
                                 send_slack_message_api(message=body)
                                 
+                                # （本文 body や info は既存のまま）
+                                rank_info = fetch_current_rank_ids(self.page) or {}
+                                cur4 = rank_info.get("level_id_4")
+                                nick = (
+                                    rank_info.get("nickname")        # ① GameMgr.Inst.account_data 等から取得
+                                    or info.get("nickname")          # ② もし別の経路で入っていたら使う（通常は無い）
+                                    or "不明"                         # ③ 最後の保険
+                                )
+
+                                rank_name = LEVEL_ID_4_TO_NAME.get(cur4, f"不明({cur4})")
+
+                                x_body = (
+                                    f"代行実施中：{nick} 様\n"
+                                    f"現在の段位：{rank_name}\n"
+                                    "=====\n"
+                                    f"{body}"
+                                )
+
+                                # 追加（初回はブラウザ認可を許可したいとき True）
+                                # send_x_post_api(message=x_body, interactive_auth=True)
+                                
                             else:
                                 # 取れなかった場合でも通知（必要なければ省略可）
                                 body = (
@@ -1083,13 +1319,12 @@ class PlaywrightController:
                                 # ★ ページを再読み込み（F5 相当）
                             try:
                                 self.page.reload()
-                                self.page.wait_for_timeout(15_000)  # 少し待機
+                                self.page.wait_for_timeout(13_000)  # 少し待機
                                 self.page.reload()
-                                self.page.wait_for_timeout(10000)  # 少し待機
+                                self.page.wait_for_timeout(8000)  # 少し待機
                             except Exception as e:
                                 logger.error(f"[Recovery] reload failed: {e}")
 
-                            # run_fixed_postgame_sequence(self.page)
 
                             # ★ ここでゲート判定 → 許可時のみ開始
                             try:
@@ -1098,8 +1333,8 @@ class PlaywrightController:
                                 else:
                                     notify_log.warning("[auto-start] skipped by rank gate (post-game)")
                                     body = (
-                                        "【代行完了】\n"
-                                        f"目的の段位に到達しました。\n代打ちを終了します。\n"
+                                        "🎉代行完了🎉\n"
+                                        f"目標の段位に到達しました。\n代打ちを終了します。\n"
                                         f"時刻: {time.strftime('%Y/%m/%d %H:%M')}"
                                     )
                                     send_slack_message_api(message=body)
@@ -1266,51 +1501,71 @@ def run_fixed_postgame_sequence(page: Page) -> None:
 def run_auto_start_sequence(page: Page) -> None:
     """
     「対戦開始」導線。
-    - 段位戦 -> （level_id_4 により 金の間 or 玉の間） -> 四人南 の順にクリック
+    - 段位戦 -> （level_id_4 により 銅/銀/金/玉の間） -> 四人東 or 四人南
     条件:
-      level_id_4 が 10302, 10303, 10401 のいずれか → 金の間
-      level_id_4 が 10402 以上 → 玉の間
-      それ以外 / 取得不能 → 既定で金の間
+      10101,10102,10103 → 銅の間 → 四人東
+      10201,10202,10203 → 銀の間 → 四人東
+      10301,10302,10303 → 金の間 → 四人南
+      それ以上 → 玉の間 → 四人南
+      不明 → 金の間(既定) → 四人南
     """
     logger.info("[auto-start] begin")
-    page.wait_for_timeout(10_000)
+    page.wait_for_timeout(8_000)
 
     # 段位戦
     _ensure_viewport(page, need_w=900+10, need_h=180+10)
     page.mouse.click(900, 180)
-    page.wait_for_timeout(3_000)
+    page.wait_for_timeout(2_000)
 
-    # --- 追加: 実際のアカウントから level_id_4 を取得して分岐 ---
-    tap_gold = True  # 既定は金の間
+    # --- アカウントから level_id_4 を取得して分岐 ---
+    room_type = "bronze"  # 既定: 金の間
     try:
         rank_info = fetch_current_rank_ids(page) or {}
         level_id_4 = _as_int(rank_info.get("level_id_4"))
         notify_log.info(f"[auto-start] detected level_id_4={level_id_4}")
 
-        if level_id_4 in (10301, 10302, 10303):
-            tap_gold = True
-            notify_log.info(f"[auto-start] level_id_4={level_id_4} -> 金の間を選択")
+        if level_id_4 in (10101, 10102, 10103):
+            room_type = "bronze"
+            notify_log.info(f"[auto-start] -> 銅の間を選択")
+        elif level_id_4 in (10201, 10202, 10203):
+            room_type = "silver"
+            notify_log.info(f"[auto-start] -> 銀の間を選択")
+        elif level_id_4 in (10301, 10302, 10303):
+            room_type = "gold"
+            notify_log.info(f"[auto-start] -> 金の間を選択")
         elif level_id_4 is not None and level_id_4 >= 10401:
-            tap_gold = False
-            notify_log.info(f"[auto-start] level_id_4={level_id_4} -> 玉の間を選択")
+            room_type = "jade"
+            notify_log.info(f"[auto-start] -> 玉の間を選択")
         else:
-            notify_log.info(f"[auto-start] level_id_4={level_id_4} (未定義/その他) -> 金の間(既定)を選択")
+            notify_log.info(f"[auto-start] 未定義/その他 -> 金の間(既定)を選択")
     except Exception as e:
         notify_log.warning(f"[auto-start] level_id_4 の取得に失敗: {e} -> 金の間(既定)を選択")
 
-    # 金の間 / 玉の間
-    if tap_gold:
+    # 銅 / 銀 / 金 / 玉 のクリック
+    if room_type == "bronze":
+        _ensure_viewport(page, need_w=900+10, need_h=300+10)
+        page.mouse.click(900, 300)   # 銅の間
+    elif room_type == "silver":
+        _ensure_viewport(page, need_w=900+10, need_h=400+10)
+        page.mouse.click(900, 400)   # 銀の間
+    elif room_type == "gold":
         _ensure_viewport(page, need_w=900+10, need_h=500+10)
         page.mouse.click(900, 500)   # 金の間
-    else:
+    elif room_type == "jade":
         _ensure_viewport(page, need_w=900+10, need_h=600+10)
-        page.mouse.click(900, 600)   # 玉の間（UIに合わせて必要なら調整）
-    page.wait_for_timeout(3_000)
-    # --- 追加ここまで ---
-
-    # 四人南
-    _ensure_viewport(page, need_w=900+10, need_h=400+10)
-    page.mouse.click(900, 400)
+        page.mouse.click(900, 600)   # 玉の間
     page.wait_for_timeout(3_000)
 
+    # --- 四人南 or 四人東 ---
+    if room_type in ("bronze", "silver"):
+        _ensure_viewport(page, need_w=900+10, need_h=300+10)
+        page.mouse.click(900, 300)   # 四人東
+        notify_log.info("[auto-start] -> 四人東を選択")
+    else:
+        _ensure_viewport(page, need_w=900+10, need_h=400+10)
+        page.mouse.click(900, 400)   # 四人南
+        notify_log.info("[auto-start] -> 四人南を選択")
+
+    page.wait_for_timeout(2_000)
     logger.info("[auto-start] done")
+

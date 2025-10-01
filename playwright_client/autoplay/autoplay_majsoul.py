@@ -287,9 +287,9 @@ class AutoPlayMajsoul(object):
 
         if mjai_msg['type'] == 'dahai' and not self.bot.self_riichi_accepted:
             # Wait scheme: light random + dealer first-discard extra
-            random_time = random.uniform(0.6, 1.2)
+            random_time = random.uniform(0.6, 0.7)
             if not self.bot.last_kawa_tile:
-                random_time = max(random_time, 1.2)
+                random_time = max(random_time, 0.7)
                 try:
                     dealer = getattr(self.bot, "_AkagiBot__dealer", None)
                     myid = getattr(self.bot, "player_id", None)
@@ -347,7 +347,7 @@ class AutoPlayMajsoul(object):
             mjai_msg['type'] = 'zimo'
 
         # 鳴きのときだけ pre-wait / none は短め
-        if mjai_msg['type'] in {'chi','pon'}:
+        if mjai_msg['type'] in {'chi','pon','ankan','kakan'}:
             pre = max(0.0, NAKI_PREWAIT)
             return_points.append(Point(-1, -1, pre))
         elif mjai_msg['type'] == 'none':

@@ -7,6 +7,15 @@ import os
 
 log = logging.getLogger("akagi.safety")
 
+# === Honor safety tuning (小さめの効果・env可変) ===
+HONOR_BASE_BONUS           = float(os.getenv("AKAGI_HONOR_BASE_BONUS", "0.08"))
+HONOR_SEEN2_BONUS          = float(os.getenv("AKAGI_HONOR_SEEN2_BONUS", "0.05"))
+HONOR_SEEN3_BONUS          = float(os.getenv("AKAGI_HONOR_SEEN3_BONUS", "0.15"))
+HONOR_ENDGAME_BOOST        = float(os.getenv("AKAGI_HONOR_ENDGAME_BOOST", "1.3"))
+HONOR_DORA_PENALTY         = float(os.getenv("AKAGI_HONOR_DORA_PENALTY", "0.18"))
+HONOR_YAKUHAI_UNSEEN_PENAL = float(os.getenv("AKAGI_HONOR_YAKUHAI_UNSEEN_PENAL", "0.06"))
+
+
 SUITS = ("m", "p", "s")
 HONORS = {"E", "S", "W", "N", "P", "F", "C"}  # 東南西北 白發中
 Tile = str
@@ -15,6 +24,77 @@ RiverItem = Tuple[Tile, bool]  # (tile, tsumogiri_flag)
 # ------------------------------
 # 基本ユーティリティ
 # ------------------------------
+def _is_genbutsu_for_any_riichi(tile: Tile, ctx: "SafetyContext") -> bool:
+    # 簡易判定: 立直者の河に同一牌が1枚でもあれば現物扱い（厳密な順目は見ない）
+    for i, f in enumerate(ctx.riichi_flags):
+        if not f:
+            continue
+        river = ctx.rivers.get(i, [])
+        for t in only_tiles(river):
+            if t == tile:
+                return True
+    return False
+
+def _visible_honor_count(tile: Tile, rivers: Dict[int, List], my_tiles: Optional[List[Tile]] = None) -> int:
+    target = tile
+    cnt = 0
+    for _, river in rivers.items():
+        for t in only_tiles(river):
+            if t == target:
+                cnt += 1
+    if my_tiles:
+        for t in my_tiles:
+            if t == target:
+                cnt += 1
+    return cnt
+
+def honor_safety_bonus(tile: Tile, ctx: "SafetyContext") -> float:
+    # 現物ではない字牌の安全度だけ、少し底上げ
+    if not is_honor(tile):
+        return 0.0
+    if _is_genbutsu_for_any_riichi(tile, ctx):
+        return 0.0  # 現物は対象外
+
+    bonus = HONOR_BASE_BONUS
+
+    # 見え枚数で上積み
+    seen = _visible_honor_count(tile, ctx.rivers, ctx.my_tiles)
+    if seen >= 3:
+        bonus += HONOR_SEEN3_BONUS
+    elif seen >= 2:
+        bonus += HONOR_SEEN2_BONUS
+
+    # 終盤（残りツモ少）で強化
+    try:
+        if ctx.remaining_tiles <= 14:
+            bonus *= HONOR_ENDGAME_BOOST
+    except Exception:
+        pass
+
+    # ドラ字牌なら控えめに減算（=危険寄り）
+    try:
+        if ctx.dora_indicators and tile in ctx.dora_indicators:
+            bonus -= HONOR_DORA_PENALTY
+    except Exception:
+        pass
+
+    # 役牌が全く見えないならわずかに減算（過信防止）
+    try:
+        yakuhai = {"P", "F", "C"}
+        river_seen = 0
+        if tile in yakuhai:
+            for _, river in ctx.rivers.items():
+                for t in only_tiles(river):
+                    if t == tile:
+                        river_seen += 1
+            if river_seen == 0:
+                bonus -= HONOR_YAKUHAI_UNSEEN_PENAL
+    except Exception:
+        pass
+
+    return max(0.0, bonus)
+
+
 def parse_tile(t: Tile) -> Tuple[str, Optional[int], bool]:
     """
     return (suit_or_honor, rank(None for honor), is_red)
@@ -327,6 +407,9 @@ def aggregate_danger(tile: Tile, ctx: SafetyContext) -> float:
     # 終盤 +補正
     if ctx.remaining_tiles <= 18:
         d += 0.15
+    
+    # 字牌現物ボーナス
+    d = max(0.0, d - honor_safety_bonus(tile, ctx))
     return max(0.0, min(1.8, d))
 
 def bucketize(d: float) -> str:

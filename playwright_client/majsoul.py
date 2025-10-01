@@ -35,7 +35,7 @@ SLACK_BOT_TOKEN  = os.getenv("SLACK_BOT_TOKEN", "xoxb-9401305398708-939767847229
 SLACK_CHANNEL_ID = os.getenv("SLACK_CHANNEL_ID", "C09BT8ZHYTE")
 
 # 段位しきい値（≦なら開始）
-AKAGI_MAX_RANK_ID_4P = os.getenv("AKAGI_MAX_RANK_ID_4P", "10403")  # 例: "10401"（四麻 雀豪1 など）
+AKAGI_MAX_RANK_ID_4P = os.getenv("AKAGI_MAX_RANK_ID_4P", "10303")  # 例: "10401"（四麻 雀豪1 など）
 AKAGI_MAX_RANK_ID_3P = os.getenv("AKAGI_MAX_RANK_ID_3P")  # 例: "20302"（三麻 雀傑2 など）
 
 LEVEL_ID_4_TO_NAME = {
@@ -1313,13 +1313,13 @@ class PlaywrightController:
                             self._started = False
                             self._ended = False
                             
-                            self.page.wait_for_timeout(10_000)  # 少し待機
+                            # self.page.wait_for_timeout(10_000)  # 少し待機
                             # _snap(self.page, "result")
                             self.page.wait_for_timeout(3_000)  # 少し待機
                                 # ★ ページを再読み込み（F5 相当）
                             try:
                                 self.page.reload()
-                                self.page.wait_for_timeout(13_000)  # 少し待機
+                                self.page.wait_for_timeout(12_000)  # 少し待機
                                 self.page.reload()
                                 self.page.wait_for_timeout(8000)  # 少し待機
                             except Exception as e:
@@ -1510,7 +1510,7 @@ def run_auto_start_sequence(page: Page) -> None:
       不明 → 金の間(既定) → 四人南
     """
     logger.info("[auto-start] begin")
-    page.wait_for_timeout(8_000)
+    page.wait_for_timeout(7_000)
 
     # 段位戦
     _ensure_viewport(page, need_w=900+10, need_h=180+10)
@@ -1554,7 +1554,7 @@ def run_auto_start_sequence(page: Page) -> None:
     elif room_type == "jade":
         _ensure_viewport(page, need_w=900+10, need_h=600+10)
         page.mouse.click(900, 600)   # 玉の間
-    page.wait_for_timeout(3_000)
+    page.wait_for_timeout(2_000)
 
     # --- 四人南 or 四人東 ---
     if room_type in ("bronze", "silver"):

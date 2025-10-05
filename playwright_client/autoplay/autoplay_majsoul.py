@@ -35,7 +35,7 @@ NAKI_CAND_WAIT = _getf("AKAGI_NAKI_CAND_WAIT", 0.05)
 NAKI_DOUBLE_CLICK = _geti("AKAGI_NAKI_DOUBLE_CLICK", 0)
 NAKI_SINGLE_WAIT = _getf("AKAGI_NAKI_SINGLE_WAIT", NAKI_CAND_WAIT)
 NAKI_NONE_PREWAIT = _getf("AKAGI_NAKI_NONE_PREWAIT", 0.05)
-AKAGI_OYA_FIRST_DAHAI_EXTRA = _getf("AKAGI_OYA_FIRST_DAHAI_EXTRA", 2.00)
+AKAGI_OYA_FIRST_DAHAI_EXTRA = _getf("AKAGI_OYA_FIRST_DAHAI_EXTRA", 3.00)
 
 # --- Strategy gates (top-player oriented; all env overridable) ---
 AKAGI_ENABLE_POLICY_GATES          = _geti("AKAGI_ENABLE_POLICY_GATES", 0)
@@ -57,7 +57,6 @@ AKAGI_FORBID_KAN_WHEN_TOP_LEAD     = _geti("AKAGI_FORBID_KAN_WHEN_TOP_LEAD", 1)
 # オーラス（ラス回避最優先）ブースト
 AKAGI_ORAS_LAST_ENABLE             = _geti("AKAGI_ORAS_LAST_ENABLE", 1)
 AKAGI_ORAS_LAST_MIN_POINT_FOR_CALL = _getf("AKAGI_ORAS_LAST_MIN_POINT_FOR_CALL", 1000.0) # ラス目時はこの打点でも鳴き許容
-
 
 # Coordinates here is on the resolution of 16x9
 LOCATION = {
@@ -287,9 +286,9 @@ class AutoPlayMajsoul(object):
 
         if mjai_msg['type'] == 'dahai' and not self.bot.self_riichi_accepted:
             # Wait scheme: light random + dealer first-discard extra
-            random_time = random.uniform(0.6, 0.7)
+            random_time = random.uniform(0.5, 0.6)
             if not self.bot.last_kawa_tile:
-                random_time = max(random_time, 0.7)
+                random_time = max(random_time, 0.6)
                 try:
                     dealer = getattr(self.bot, "_AkagiBot__dealer", None)
                     myid = getattr(self.bot, "player_id", None)
@@ -348,7 +347,7 @@ class AutoPlayMajsoul(object):
 
         # 鳴きのときだけ pre-wait / none は短め
         if mjai_msg['type'] in {'chi','pon','ankan','kakan'}:
-            pre = max(0.0, NAKI_PREWAIT)
+            pre = max(0.0, NAKI_PREWAIT + random.uniform(-0.02, 0.02))
             return_points.append(Point(-1, -1, pre))
         elif mjai_msg['type'] == 'none':
             pre = max(0.0, NAKI_NONE_PREWAIT)
@@ -411,42 +410,56 @@ class AutoPlayMajsoul(object):
 
         if mjai_msg['type'] == 'reach':
             return return_points
+        
+        if mjai_msg['type'] == 'ryukyoku':
+            return return_points
 
+       # ---- 候補（チーの左右/中、ポンの面子選択） ----
         if mjai_msg['type'] in ['chi', 'pon', 'ankan', 'kakan']:
-            consumed_pais_mjai = mjai_msg['consumed']
-            consumed_pais_mjai = sorted(consumed_pais_mjai, key=cmp_to_key(compare_pai))
+            consumed_pais_mjai = sorted(mjai_msg['consumed'], key=cmp_to_key(compare_pai))
 
             if mjai_msg['type'] == 'chi':
-                chi_candidates = self.bot.find_chi_consume_simple()
+                chi_candidates = sorted(self.bot.find_chi_consume_simple(), key=cmp_to_key(compare_tehai))
                 if len(chi_candidates) == 1:
-                    return return_points # No need to click
-                chi_candidates = sorted(chi_candidates, key=cmp_to_key(compare_tehai))
+                    return_points.append(Point(-1, -1, max(0.0, NAKI_SINGLE_WAIT + random.uniform(-0.02, 0.02))))
+                    return return_points
                 for idx, chi_candidate in enumerate(chi_candidates):
                     if consumed_pais_mjai == chi_candidate:
                         candidate_idx = int((-(len(chi_candidates)/2)+idx+0.5)*2+5)
-                        return_points.append(
-                            Point(
-                                LOCATION['candidates'][candidate_idx][0], 
-                                LOCATION['candidates'][candidate_idx][1], 
-                                0.3
-                            )
-                        )
+                        return_points.append(Point(
+                            LOCATION['candidates'][candidate_idx][0],
+                            LOCATION['candidates'][candidate_idx][1],
+                            max(0.0, NAKI_CAND_WAIT + random.uniform(-0.02, 0.02))
+                        ))
                         return return_points
+                mid_idx = int((-(len(chi_candidates)/2)+(len(chi_candidates)//2)+0.5)*2+5)
+                return_points.append(Point(
+                    LOCATION['candidates'][mid_idx][0],
+                    LOCATION['candidates'][mid_idx][1],
+                    max(0.0, NAKI_CAND_WAIT + random.uniform(-0.02, 0.02))
+                ))
+                return return_points
+
             elif mjai_msg['type'] == 'pon':
                 pon_candidates = self.bot.find_pon_consume_simple()
                 if len(pon_candidates) == 1:
-                    return return_points # No need to click
-                # Theorem: len(pon_candidates) max is 2
-                # We just click the second one no matter what
-                candidate_idx = int((-(2/2)+1+0.5)*2+5)
-                return_points.append(
-                    Point(
-                        LOCATION['candidates'][candidate_idx][0], 
-                        LOCATION['candidates'][candidate_idx][1], 
-                        0.3
-                    )
-                )
-                return return_points
+                    return_points.append(Point(-1, -1, max(0.0, NAKI_SINGLE_WAIT + random.uniform(-0.02, 0.02))))
+                    return return_points
+                def _norm(lst): return sorted(lst, key=cmp_to_key(compare_pai))
+                target_norm = _norm(consumed_pais_mjai)
+                idx_match = None
+                for i, cand in enumerate(pon_candidates):
+                    if _norm(cand) == target_norm:
+                        idx_match = i
+                        break
+                if idx_match is None:
+                    idx_match = 1 if len(pon_candidates) >= 2 else 0
+                candidate_idx = int((-(len(pon_candidates)/2)+idx_match+0.5)*2+5)
+                return_points.append(Point(
+                    LOCATION['candidates'][candidate_idx][0],
+                    LOCATION['candidates'][candidate_idx][1],
+                    max(0.0, NAKI_CAND_WAIT + random.uniform(-0.02, 0.02))
+                ))
 
             elif mjai_msg['type'] in ['ankan', 'kakan']:
                 tehai34 = self.bot.tehai_vec34

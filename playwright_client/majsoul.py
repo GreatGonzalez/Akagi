@@ -28,11 +28,11 @@ import logging
 notify_log = logging.getLogger("akagi.notify")
 AKAGI_DEBUG_NOTIFY        = os.getenv("AKAGI_DEBUG_NOTIFY", "0") == "1"
 
-LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "+qrM74c/z/cvE7GAi1ul9+Zpwv78TQW42f6E708XYen1M6qiFQX7FTB57Z6vwxgVgS8jH0g9jJdjTQtV3PEHJMwdyZjgpvVt92BhQ0KOujah+J/fNGK7jYrbswtObHQ+wn3m14rQZQKdKsRDvouCtgdB04t89/1O/w1cDnyilFU=")
-LINE_USER_ID              = os.getenv("LINE_USER_ID", "U1c2db82d9871049d72d5e26feeb7eb19")
+LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "")
+LINE_USER_ID              = os.getenv("LINE_USER_ID", "")
 
-SLACK_BOT_TOKEN  = os.getenv("SLACK_BOT_TOKEN", "xoxb-9401305398708-9397678472290-hPiRJGAY7nQhhcNWC3em0jIi")
-SLACK_CHANNEL_ID = os.getenv("SLACK_CHANNEL_ID", "C09BT8ZHYTE")
+SLACK_BOT_TOKEN  = os.getenv("SLACK_BOT_TOKEN", "")
+SLACK_CHANNEL_ID = os.getenv("SLACK_CHANNEL_ID", "")
 
 # 段位しきい値（≦なら開始）
 AKAGI_MAX_RANK_ID_4P = os.getenv("AKAGI_MAX_RANK_ID_4P", "10303")  # 例: "10401"（四麻 雀豪1 など）
